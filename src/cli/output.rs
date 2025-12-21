@@ -331,3 +331,114 @@ fn truncate_lines(s: &str, max_lines: usize) -> String {
         format!("{}\n  [... truncated, use --full to see all]", truncated.join("\n"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_short_string() {
+        let result = truncate("hello", 10);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        let result = truncate("hello", 5);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        let result = truncate("hello world", 8);
+        assert_eq!(result, "hello w…");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        let result = truncate("héllo wörld", 8);
+        assert_eq!(result, "héllo w…");
+    }
+
+    #[test]
+    fn test_truncate_lines_short() {
+        let input = "line1\nline2\nline3";
+        let result = truncate_lines(input, 5);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_truncate_lines_exact() {
+        let input = "line1\nline2\nline3";
+        let result = truncate_lines(input, 3);
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_truncate_lines_truncated() {
+        let input = "line1\nline2\nline3\nline4\nline5";
+        let result = truncate_lines(input, 2);
+        assert!(result.contains("line1"));
+        assert!(result.contains("line2"));
+        assert!(!result.contains("line3"));
+        assert!(result.contains("truncated"));
+    }
+
+    #[test]
+    fn test_format_state_all_variants() {
+        assert_eq!(format_state(&ConversationState::Unread), "unread");
+        assert_eq!(format_state(&ConversationState::Opened), "open");
+        assert_eq!(format_state(&ConversationState::Closed), "closed");
+        assert_eq!(format_state(&ConversationState::Snoozed), "snoozed");
+        assert_eq!(format_state(&ConversationState::Spam), "spam");
+        assert_eq!(format_state(&ConversationState::Deleted), "deleted");
+    }
+
+    #[test]
+    fn test_state_color_all_variants() {
+        use comfy_table::Color;
+        assert_eq!(state_color(&ConversationState::Unread), Color::Yellow);
+        assert_eq!(state_color(&ConversationState::Opened), Color::Green);
+        assert_eq!(state_color(&ConversationState::Closed), Color::DarkGrey);
+        assert_eq!(state_color(&ConversationState::Snoozed), Color::Blue);
+        assert_eq!(state_color(&ConversationState::Spam), Color::Red);
+        assert_eq!(state_color(&ConversationState::Deleted), Color::DarkGrey);
+    }
+
+    #[test]
+    fn test_format_relative_time_just_now() {
+        let now = Utc::now();
+        let result = format_relative_time(&now);
+        assert_eq!(result, "just now");
+    }
+
+    #[test]
+    fn test_format_relative_time_minutes() {
+        let time = Utc::now() - chrono::Duration::minutes(30);
+        let result = format_relative_time(&time);
+        assert!(result.contains("m ago"));
+    }
+
+    #[test]
+    fn test_format_relative_time_hours() {
+        let time = Utc::now() - chrono::Duration::hours(5);
+        let result = format_relative_time(&time);
+        assert!(result.contains("h ago"));
+    }
+
+    #[test]
+    fn test_format_relative_time_days() {
+        let time = Utc::now() - chrono::Duration::days(3);
+        let result = format_relative_time(&time);
+        assert!(result.contains("d ago"));
+    }
+
+    #[test]
+    fn test_format_relative_time_old() {
+        let time = Utc::now() - chrono::Duration::days(30);
+        let result = format_relative_time(&time);
+        // Should show date format YYYY-MM-DD
+        assert!(result.contains("-"));
+        assert!(!result.contains("ago"));
+    }
+}

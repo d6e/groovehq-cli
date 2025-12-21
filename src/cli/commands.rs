@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 
 #[derive(Parser)]
 #[command(name = "groove")]
@@ -11,6 +12,10 @@ pub struct Cli {
     /// API token (overrides config file and env var)
     #[arg(long, global = true, hide_env_values = true)]
     pub token: Option<String>,
+
+    /// Suppress success messages (useful for scripting)
+    #[arg(long, global = true)]
+    pub quiet: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -53,6 +58,12 @@ pub enum Commands {
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
     },
 }
 
@@ -101,6 +112,10 @@ pub enum ConversationAction {
 
         /// Reply body (reads from stdin if not provided)
         body: Option<String>,
+
+        /// Use a canned reply by name or ID
+        #[arg(short, long)]
+        canned: Option<String>,
     },
 
     /// Close a conversation
@@ -133,6 +148,12 @@ pub enum ConversationAction {
         agent: String,
     },
 
+    /// Unassign a conversation
+    Unassign {
+        /// Conversation number(s)
+        numbers: Vec<i64>,
+    },
+
     /// Add tags to a conversation
     #[command(alias = "tag")]
     AddTag {
@@ -140,6 +161,16 @@ pub enum ConversationAction {
         number: i64,
 
         /// Tag names to add
+        tags: Vec<String>,
+    },
+
+    /// Remove tags from a conversation
+    #[command(alias = "untag")]
+    RemoveTag {
+        /// Conversation number
+        number: i64,
+
+        /// Tag names to remove
         tags: Vec<String>,
     },
 
@@ -201,4 +232,9 @@ pub enum OutputFormat {
     Table,
     Json,
     Compact,
+}
+
+pub fn print_completions(shell: Shell) {
+    let mut cmd = Cli::command();
+    generate(shell, &mut cmd, "groove", &mut std::io::stdout());
 }

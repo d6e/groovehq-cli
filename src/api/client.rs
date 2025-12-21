@@ -532,6 +532,33 @@ impl GrooveClient {
         response.conversation_assign.into_result()
     }
 
+    pub async fn unassign(&self, conversation_id: &str) -> Result<()> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            conversation_unassign: MutationResult,
+        }
+
+        let query = r#"
+            mutation Unassign($input: ConversationUnassignInput!) {
+                conversationUnassign(input: $input) {
+                    errors {
+                        message
+                    }
+                }
+            }
+        "#;
+
+        let variables = json!({
+            "input": {
+                "conversationId": conversation_id
+            }
+        });
+
+        let response: Response = self.execute(query, Some(variables)).await?;
+        response.conversation_unassign.into_result()
+    }
+
     pub async fn add_note(&self, conversation_id: &str, body: &str) -> Result<()> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -586,6 +613,34 @@ impl GrooveClient {
 
         let response: Response = self.execute(query, Some(variables)).await?;
         response.conversation_tag.into_result()
+    }
+
+    pub async fn untag(&self, conversation_id: &str, tag_ids: Vec<String>) -> Result<()> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            conversation_untag: MutationResult,
+        }
+
+        let query = r#"
+            mutation Untag($input: ConversationUntagInput!) {
+                conversationUntag(input: $input) {
+                    errors {
+                        message
+                    }
+                }
+            }
+        "#;
+
+        let variables = json!({
+            "input": {
+                "conversationId": conversation_id,
+                "tagIds": tag_ids
+            }
+        });
+
+        let response: Response = self.execute(query, Some(variables)).await?;
+        response.conversation_untag.into_result()
     }
 
     pub async fn agents(&self) -> Result<Vec<Agent>> {

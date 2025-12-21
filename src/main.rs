@@ -12,7 +12,7 @@ use std::io::{self, IsTerminal, Read};
 use api::GrooveClient;
 use cli::{
     CannedRepliesAction, Commands, ConfigAction, ConversationAction, FolderAction, OutputFormat,
-    TagAction,
+    TagAction, print_completions,
 };
 use config::Config;
 
@@ -38,18 +38,21 @@ async fn run() -> anyhow::Result<()> {
     let config = Config::load().context("Failed to load configuration")?;
 
     match &cli.command {
-        Commands::Config { action } => handle_config(action, &config)?,
+        Commands::Config { action } => handle_config(action, &config, cli.quiet)?,
+        Commands::Completions { shell } => {
+            print_completions(*shell);
+        }
         _ => {
             let token = config::resolve_token(cli.token.as_deref(), &config)?;
             let client = GrooveClient::new(&token, config.api_endpoint.as_deref())?;
-            handle_command(&cli.command, &client, &cli.format, &config).await?;
+            handle_command(&cli.command, &client, &cli.format, &config, cli.quiet).await?;
         }
     }
 
     Ok(())
 }
 
-fn handle_config(action: &ConfigAction, config: &Config) -> anyhow::Result<()> {
+fn handle_config(action: &ConfigAction, config: &Config, quiet: bool) -> anyhow::Result<()> {
     match action {
         ConfigAction::Show => {
             if let Some(token) = &config.api_token {
@@ -69,7 +72,9 @@ fn handle_config(action: &ConfigAction, config: &Config) -> anyhow::Result<()> {
         ConfigAction::SetToken { token } => {
             let mut config = config.clone();
             config.set_token(token.clone())?;
-            println!("Token saved successfully");
+            if !quiet {
+                println!("Token saved successfully");
+            }
         }
         ConfigAction::Path => {
             if let Some(path) = Config::path() {
@@ -87,6 +92,7 @@ async fn handle_command(
     client: &GrooveClient,
     format: &OutputFormat,
     config: &Config,
+    quiet: bool,
 ) -> anyhow::Result<()> {
     match command {
         Commands::Me => {
@@ -95,7 +101,7 @@ async fn handle_command(
         }
 
         Commands::Conversation { action } => {
-            handle_conversation(action, client, format, config).await?;
+            handle_conversation(action, client, format, config, quiet).await?;
         }
 
         Commands::Folder { action } => {
@@ -110,7 +116,7 @@ async fn handle_command(
             handle_canned_replies(action, client, format).await?;
         }
 
-        Commands::Config { .. } => unreachable!(),
+        Commands::Config { .. } | Commands::Completions { .. } => unreachable!(),
     }
 
     Ok(())
@@ -121,6 +127,7 @@ async fn handle_conversation(
     client: &GrooveClient,
     format: &OutputFormat,
     config: &Config,
+    quiet: bool,
 ) -> anyhow::Result<()> {
     match action {
         ConversationAction::List {
@@ -145,42 +152,75 @@ async fn handle_conversation(
         }
 
         ConversationAction::View { number, full } => {
+            validate_conversation_number(*number)?;
             let conv = client.conversation(*number).await?;
             let messages = client.messages(&conv.id, None).await?;
             cli::format_conversation_detail(&conv, &messages, *full);
         }
 
-        ConversationAction::Reply { number, body } => {
-            let body = get_body(body.clone())?;
+        ConversationAction::Reply { number, body, canned } => {
+            validate_conversation_number(*number)?;
+            let body = if let Some(canned_name) = canned {
+                // Look up canned reply
+                let canned_replies = client.canned_replies().await?;
+                let canned_reply = canned_replies
+                    .iter()
+                    .find(|r| r.name.eq_ignore_ascii_case(canned_name) || r.id == *canned_name)
+                    .ok_or_else(|| error::GrooveError::CannedReplyNotFound(canned_name.clone()))?;
+
+                let canned_body = canned_reply.body.clone().unwrap_or_default();
+
+                // Optionally append custom text
+                if let Some(extra) = body {
+                    format!("{}\n\n{}", canned_body, extra)
+                } else {
+                    canned_body
+                }
+            } else {
+                get_body(body.clone())?
+            };
+
             let conv = client.conversation(*number).await?;
             client.reply(&conv.id, &body).await?;
-            println!("Reply sent to conversation #{}", number);
+            if !quiet {
+                println!("Reply sent to conversation #{}", number);
+            }
         }
 
         ConversationAction::Close { numbers } => {
+            validate_conversation_numbers(numbers)?;
             for number in numbers {
                 let conv = client.conversation(*number).await?;
                 client.close(&conv.id).await?;
-                println!("Closed conversation #{}", number);
+                if !quiet {
+                    println!("Closed conversation #{}", number);
+                }
             }
         }
 
         ConversationAction::Open { numbers } => {
+            validate_conversation_numbers(numbers)?;
             for number in numbers {
                 let conv = client.conversation(*number).await?;
                 client.open(&conv.id).await?;
-                println!("Opened conversation #{}", number);
+                if !quiet {
+                    println!("Opened conversation #{}", number);
+                }
             }
         }
 
         ConversationAction::Snooze { number, duration } => {
+            validate_conversation_number(*number)?;
             let until = parse_duration(duration)?;
             let conv = client.conversation(*number).await?;
             client.snooze(&conv.id, &until).await?;
-            println!("Snoozed conversation #{} until {}", number, until);
+            if !quiet {
+                println!("Snoozed conversation #{} until {}", number, until);
+            }
         }
 
         ConversationAction::Assign { number, agent } => {
+            validate_conversation_number(*number)?;
             let conv = client.conversation(*number).await?;
 
             let agent_id = if agent == "me" {
@@ -196,10 +236,24 @@ async fn handle_conversation(
             };
 
             client.assign(&conv.id, &agent_id).await?;
-            println!("Assigned conversation #{} to {}", number, agent);
+            if !quiet {
+                println!("Assigned conversation #{} to {}", number, agent);
+            }
+        }
+
+        ConversationAction::Unassign { numbers } => {
+            validate_conversation_numbers(numbers)?;
+            for number in numbers {
+                let conv = client.conversation(*number).await?;
+                client.unassign(&conv.id).await?;
+                if !quiet {
+                    println!("Unassigned conversation #{}", number);
+                }
+            }
         }
 
         ConversationAction::AddTag { number, tags } => {
+            validate_conversation_number(*number)?;
             let conv = client.conversation(*number).await?;
             let all_tags = client.tags().await?;
 
@@ -213,14 +267,39 @@ async fn handle_conversation(
             }
 
             client.tag(&conv.id, tag_ids).await?;
-            println!("Added tags to conversation #{}", number);
+            if !quiet {
+                println!("Added tags to conversation #{}", number);
+            }
+        }
+
+        ConversationAction::RemoveTag { number, tags } => {
+            validate_conversation_number(*number)?;
+            let conv = client.conversation(*number).await?;
+            let all_tags = client.tags().await?;
+
+            let mut tag_ids = Vec::new();
+            for tag_name in tags {
+                let tag = all_tags
+                    .iter()
+                    .find(|t| t.name.eq_ignore_ascii_case(tag_name))
+                    .ok_or_else(|| error::GrooveError::TagNotFound(tag_name.to_string()))?;
+                tag_ids.push(tag.id.clone());
+            }
+
+            client.untag(&conv.id, tag_ids).await?;
+            if !quiet {
+                println!("Removed tags from conversation #{}", number);
+            }
         }
 
         ConversationAction::Note { number, body } => {
+            validate_conversation_number(*number)?;
             let body = get_body(body.clone())?;
             let conv = client.conversation(*number).await?;
             client.add_note(&conv.id, &body).await?;
-            println!("Note added to conversation #{}", number);
+            if !quiet {
+                println!("Note added to conversation #{}", number);
+            }
         }
     }
 
@@ -277,6 +356,20 @@ async fn handle_canned_replies(
     Ok(())
 }
 
+fn validate_conversation_number(number: i64) -> anyhow::Result<()> {
+    if number <= 0 {
+        anyhow::bail!("Conversation number must be positive, got: {}", number);
+    }
+    Ok(())
+}
+
+fn validate_conversation_numbers(numbers: &[i64]) -> anyhow::Result<()> {
+    for number in numbers {
+        validate_conversation_number(*number)?;
+    }
+    Ok(())
+}
+
 fn get_body(body_arg: Option<String>) -> anyhow::Result<String> {
     if let Some(body) = body_arg {
         return Ok(body);
@@ -323,4 +416,110 @@ fn parse_duration(s: &str) -> anyhow::Result<String> {
 
     let until = Utc::now() + duration;
     Ok(until.to_rfc3339())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration_minutes() {
+        let result = parse_duration("30m").unwrap();
+        // Should return a valid RFC3339 datetime
+        assert!(result.contains("T"));
+        assert!(chrono::DateTime::parse_from_rfc3339(&result).is_ok());
+    }
+
+    #[test]
+    fn test_parse_duration_hours() {
+        let result = parse_duration("2h").unwrap();
+        assert!(result.contains("T"));
+        assert!(chrono::DateTime::parse_from_rfc3339(&result).is_ok());
+    }
+
+    #[test]
+    fn test_parse_duration_days() {
+        let result = parse_duration("5d").unwrap();
+        assert!(result.contains("T"));
+        assert!(chrono::DateTime::parse_from_rfc3339(&result).is_ok());
+    }
+
+    #[test]
+    fn test_parse_duration_weeks() {
+        let result = parse_duration("1w").unwrap();
+        assert!(result.contains("T"));
+        assert!(chrono::DateTime::parse_from_rfc3339(&result).is_ok());
+    }
+
+    #[test]
+    fn test_parse_duration_iso_passthrough() {
+        let iso = "2024-12-25T10:00:00Z";
+        let result = parse_duration(iso).unwrap();
+        assert_eq!(result, iso);
+    }
+
+    #[test]
+    fn test_parse_duration_date_passthrough() {
+        let date = "2024-12-25";
+        let result = parse_duration(date).unwrap();
+        assert_eq!(result, date);
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_too_short() {
+        let result = parse_duration("h");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid duration"));
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_unit() {
+        let result = parse_duration("5x");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid duration unit"));
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_number() {
+        let result = parse_duration("abch");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid duration number"));
+    }
+
+    #[test]
+    fn test_validate_conversation_number_valid() {
+        assert!(validate_conversation_number(1).is_ok());
+        assert!(validate_conversation_number(100).is_ok());
+        assert!(validate_conversation_number(999999).is_ok());
+    }
+
+    #[test]
+    fn test_validate_conversation_number_zero() {
+        let result = validate_conversation_number(0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be positive"));
+    }
+
+    #[test]
+    fn test_validate_conversation_number_negative() {
+        let result = validate_conversation_number(-5);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be positive"));
+    }
+
+    #[test]
+    fn test_validate_conversation_numbers_valid() {
+        assert!(validate_conversation_numbers(&[1, 2, 3]).is_ok());
+        assert!(validate_conversation_numbers(&[100]).is_ok());
+        assert!(validate_conversation_numbers(&[]).is_ok());
+    }
+
+    #[test]
+    fn test_validate_conversation_numbers_invalid() {
+        let result = validate_conversation_numbers(&[1, 0, 3]);
+        assert!(result.is_err());
+
+        let result = validate_conversation_numbers(&[-1, 2, 3]);
+        assert!(result.is_err());
+    }
 }

@@ -68,3 +68,82 @@ impl Config {
         self.save()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert!(config.api_token.is_none());
+        assert!(config.api_endpoint.is_none());
+        assert!(config.defaults.format.is_none());
+        assert!(config.defaults.limit.is_none());
+        assert!(config.defaults.folder.is_none());
+        assert!(config.aliases.is_empty());
+    }
+
+    #[test]
+    fn test_config_parse_toml_minimal() {
+        let toml_str = r#"
+api_token = "test-token"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.api_token, Some("test-token".to_string()));
+        assert!(config.api_endpoint.is_none());
+    }
+
+    #[test]
+    fn test_config_parse_toml_full() {
+        let toml_str = r#"
+api_token = "test-token"
+api_endpoint = "https://custom.api.com/graphql"
+
+[defaults]
+format = "json"
+limit = 50
+folder = "inbox"
+
+[aliases]
+ls = "conversation list"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.api_token, Some("test-token".to_string()));
+        assert_eq!(config.api_endpoint, Some("https://custom.api.com/graphql".to_string()));
+        assert_eq!(config.defaults.format, Some("json".to_string()));
+        assert_eq!(config.defaults.limit, Some(50));
+        assert_eq!(config.defaults.folder, Some("inbox".to_string()));
+        assert_eq!(config.aliases.get("ls"), Some(&"conversation list".to_string()));
+    }
+
+    #[test]
+    fn test_config_parse_toml_empty() {
+        let toml_str = "";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.api_token.is_none());
+    }
+
+    #[test]
+    fn test_config_serialize_roundtrip() {
+        let mut config = Config::default();
+        config.api_token = Some("secret-token".to_string());
+        config.defaults.limit = Some(100);
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(config.api_token, deserialized.api_token);
+        assert_eq!(config.defaults.limit, deserialized.defaults.limit);
+    }
+
+    #[test]
+    fn test_config_path_returns_some() {
+        // Config path should return Some on most systems
+        let path = Config::path();
+        // We just check it doesn't panic and returns a path with config.toml
+        if let Some(p) = path {
+            assert!(p.to_string_lossy().contains("config.toml"));
+        }
+    }
+}

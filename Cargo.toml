@@ -35,3 +35,15 @@ chrono = { version = "0.4", features = ["serde"] }
 # Terminal output
 colored = "2.1"
 comfy-table = "7.1"
+
+# Shell completions
+clap_complete = "4.4"
+
+[dev-dependencies]
+# CLI testing
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.10"
+
+# API mocking
+wiremock = "0.6"

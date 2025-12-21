@@ -1,0 +1,332 @@
+use crate::api::ConversationsResponse;
+use crate::cli::OutputFormat;
+use crate::types::*;
+use chrono::{DateTime, Utc};
+use colored::Colorize;
+use comfy_table::{presets::UTF8_FULL_CONDENSED, Cell, Color, ContentArrangement, Table};
+
+pub fn format_conversations(response: &ConversationsResponse, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(response).unwrap());
+        }
+        OutputFormat::Compact => {
+            for conv in &response.nodes {
+                let status = format!("[{}]", conv.state);
+                let subject = conv.subject.as_deref().unwrap_or("(no subject)");
+                let contact = conv
+                    .contact
+                    .as_ref()
+                    .and_then(|c| c.email.as_deref())
+                    .unwrap_or("unknown");
+                println!("#{} {} {} - {}", conv.number, status, subject, contact);
+            }
+        }
+        OutputFormat::Table => {
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL_CONDENSED)
+                .set_content_arrangement(ContentArrangement::Dynamic)
+                .set_header(vec!["#", "Status", "Subject", "From", "Updated"]);
+
+            for conv in &response.nodes {
+                let status = format_state(&conv.state);
+                let subject = truncate(conv.subject.as_deref().unwrap_or("(no subject)"), 40);
+                let contact = conv
+                    .contact
+                    .as_ref()
+                    .and_then(|c| c.email.as_deref().or(c.name.as_deref()))
+                    .unwrap_or("unknown");
+                let updated = format_relative_time(&conv.updated_at);
+
+                table.add_row(vec![
+                    Cell::new(conv.number),
+                    Cell::new(&status).fg(state_color(&conv.state)),
+                    Cell::new(subject),
+                    Cell::new(truncate(contact, 25)),
+                    Cell::new(updated),
+                ]);
+            }
+
+            println!("{table}");
+            println!(
+                "\nShowing {} of {} conversations",
+                response.nodes.len(),
+                response.total_count
+            );
+
+            if response.page_info.has_next_page {
+                if let Some(cursor) = &response.page_info.end_cursor {
+                    println!("Next page: --after {}", cursor);
+                }
+            }
+        }
+    }
+}
+
+pub fn format_conversation_detail(conv: &Conversation, messages: &[Message], full: bool) {
+    println!("{}", "─".repeat(60).dimmed());
+    println!("{} #{}", "Conversation".bold(), conv.number.to_string().bold());
+    println!("{}", "─".repeat(60).dimmed());
+
+    if let Some(subject) = &conv.subject {
+        println!("{}: {}", "Subject".dimmed(), subject);
+    }
+
+    println!(
+        "{}: {}",
+        "Status".dimmed(),
+        format_state(&conv.state).color(state_color_str(&conv.state))
+    );
+
+    if let Some(contact) = &conv.contact {
+        let name = contact.name.as_deref().unwrap_or("");
+        let email = contact.email.as_deref().unwrap_or("unknown");
+        if name.is_empty() {
+            println!("{}: {}", "From".dimmed(), email);
+        } else {
+            println!("{}: {} <{}>", "From".dimmed(), name, email);
+        }
+    }
+
+    if let Some(agent) = &conv.assigned {
+        let name = agent.name.as_deref().unwrap_or(&agent.email);
+        println!("{}: {}", "Assigned".dimmed(), name);
+    } else {
+        println!("{}: {}", "Assigned".dimmed(), "unassigned".yellow());
+    }
+
+    if !conv.tags.is_empty() {
+        let tags: Vec<_> = conv.tags.iter().map(|t| t.name.as_str()).collect();
+        println!("{}: {}", "Tags".dimmed(), tags.join(", "));
+    }
+
+    println!(
+        "{}: {}",
+        "Created".dimmed(),
+        conv.created_at.format("%Y-%m-%d %H:%M")
+    );
+
+    println!("{}", "─".repeat(60).dimmed());
+    println!();
+
+    for msg in messages {
+        print_message(msg, full);
+    }
+}
+
+fn print_message(msg: &Message, full: bool) {
+    let author_name = msg
+        .author
+        .as_ref()
+        .and_then(|a| a.name.as_deref().or(a.email.as_deref()))
+        .unwrap_or("Unknown");
+
+    let author_type = msg
+        .author
+        .as_ref()
+        .and_then(|a| a.typename.as_deref())
+        .unwrap_or("Unknown");
+
+    let time = msg.created_at.format("%b %d, %H:%M");
+
+    let label = match author_type {
+        "Agent" => format!("[Agent] {}", author_name).cyan(),
+        "Contact" => format!("[Customer] {}", author_name).green(),
+        _ => format!("[{}] {}", author_type, author_name).normal(),
+    };
+
+    println!("{} • {}", label, time.to_string().dimmed());
+
+    if let Some(body) = &msg.body_text {
+        let text = if full {
+            body.clone()
+        } else {
+            truncate_lines(body, 10)
+        };
+        println!("{}\n", text);
+    }
+}
+
+pub fn format_folders(folders: &[Folder], format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(folders).unwrap());
+        }
+        OutputFormat::Compact => {
+            for folder in folders {
+                let count = folder.count.map(|c| c.to_string()).unwrap_or_default();
+                println!("{} ({})", folder.name, count);
+            }
+        }
+        OutputFormat::Table => {
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Count", "ID"]);
+
+            for folder in folders {
+                table.add_row(vec![
+                    Cell::new(&folder.name),
+                    Cell::new(folder.count.unwrap_or(0)),
+                    Cell::new(&folder.id).fg(Color::DarkGrey),
+                ]);
+            }
+
+            println!("{table}");
+        }
+    }
+}
+
+pub fn format_tags(tags: &[Tag], format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(tags).unwrap());
+        }
+        OutputFormat::Compact => {
+            for tag in tags {
+                println!("{}", tag.name);
+            }
+        }
+        OutputFormat::Table => {
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Color", "ID"]);
+
+            for tag in tags {
+                table.add_row(vec![
+                    Cell::new(&tag.name),
+                    Cell::new(tag.color.as_deref().unwrap_or("-")),
+                    Cell::new(&tag.id).fg(Color::DarkGrey),
+                ]);
+            }
+
+            println!("{table}");
+        }
+    }
+}
+
+pub fn format_canned_replies(replies: &[CannedReply], format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(replies).unwrap());
+        }
+        OutputFormat::Compact => {
+            for reply in replies {
+                println!("{}", reply.name);
+            }
+        }
+        OutputFormat::Table => {
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL_CONDENSED)
+                .set_header(vec!["Name", "Subject", "ID"]);
+
+            for reply in replies {
+                table.add_row(vec![
+                    Cell::new(&reply.name),
+                    Cell::new(reply.subject.as_deref().unwrap_or("-")),
+                    Cell::new(&reply.id).fg(Color::DarkGrey),
+                ]);
+            }
+
+            println!("{table}");
+        }
+    }
+}
+
+pub fn format_canned_reply(reply: &CannedReply) {
+    println!("{}: {}", "Name".dimmed(), reply.name);
+    if let Some(subject) = &reply.subject {
+        println!("{}: {}", "Subject".dimmed(), subject);
+    }
+    println!("{}", "─".repeat(40).dimmed());
+    if let Some(body) = &reply.body {
+        println!("{}", body);
+    }
+}
+
+pub fn format_agent(agent: &CurrentAgent, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(agent).unwrap());
+        }
+        _ => {
+            println!("{}: {}", "Name".dimmed(), agent.name.as_deref().unwrap_or("-"));
+            println!("{}: {}", "Email".dimmed(), agent.email);
+            if let Some(role) = &agent.role {
+                println!("{}: {}", "Role".dimmed(), role);
+            }
+            println!("{}: {}", "ID".dimmed(), agent.id);
+        }
+    }
+}
+
+fn format_state(state: &ConversationState) -> String {
+    match state {
+        ConversationState::Unread => "unread".to_string(),
+        ConversationState::Opened => "open".to_string(),
+        ConversationState::Closed => "closed".to_string(),
+        ConversationState::Snoozed => "snoozed".to_string(),
+        ConversationState::Spam => "spam".to_string(),
+        ConversationState::Deleted => "deleted".to_string(),
+    }
+}
+
+fn state_color(state: &ConversationState) -> Color {
+    match state {
+        ConversationState::Unread => Color::Yellow,
+        ConversationState::Opened => Color::Green,
+        ConversationState::Closed => Color::DarkGrey,
+        ConversationState::Snoozed => Color::Blue,
+        ConversationState::Spam => Color::Red,
+        ConversationState::Deleted => Color::DarkGrey,
+    }
+}
+
+fn state_color_str(state: &ConversationState) -> &'static str {
+    match state {
+        ConversationState::Unread => "yellow",
+        ConversationState::Opened => "green",
+        ConversationState::Closed => "white",
+        ConversationState::Snoozed => "blue",
+        ConversationState::Spam => "red",
+        ConversationState::Deleted => "white",
+    }
+}
+
+fn format_relative_time(dt: &DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let duration = now.signed_duration_since(*dt);
+
+    if duration.num_minutes() < 1 {
+        "just now".to_string()
+    } else if duration.num_minutes() < 60 {
+        format!("{}m ago", duration.num_minutes())
+    } else if duration.num_hours() < 24 {
+        format!("{}h ago", duration.num_hours())
+    } else if duration.num_days() < 7 {
+        format!("{}d ago", duration.num_days())
+    } else {
+        dt.format("%Y-%m-%d").to_string()
+    }
+}
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
+    }
+}
+
+fn truncate_lines(s: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    if lines.len() <= max_lines {
+        s.to_string()
+    } else {
+        let truncated: Vec<&str> = lines.into_iter().take(max_lines).collect();
+        format!("{}\n  [... truncated, use --full to see all]", truncated.join("\n"))
+    }
+}

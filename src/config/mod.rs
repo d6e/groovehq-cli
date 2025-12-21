@@ -49,16 +49,15 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = Self::path().ok_or_else(|| {
-            GrooveError::Config("Could not determine config directory".into())
-        })?;
+        let path = Self::path()
+            .ok_or_else(|| GrooveError::Config("Could not determine config directory".into()))?;
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let contents = toml::to_string_pretty(self)
-            .map_err(|e| GrooveError::Config(e.to_string()))?;
+        let contents =
+            toml::to_string_pretty(self).map_err(|e| GrooveError::Config(e.to_string()))?;
         std::fs::write(&path, contents)?;
         Ok(())
     }
@@ -110,11 +109,17 @@ ls = "conversation list"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.api_token, Some("test-token".to_string()));
-        assert_eq!(config.api_endpoint, Some("https://custom.api.com/graphql".to_string()));
+        assert_eq!(
+            config.api_endpoint,
+            Some("https://custom.api.com/graphql".to_string())
+        );
         assert_eq!(config.defaults.format, Some("json".to_string()));
         assert_eq!(config.defaults.limit, Some(50));
         assert_eq!(config.defaults.folder, Some("inbox".to_string()));
-        assert_eq!(config.aliases.get("ls"), Some(&"conversation list".to_string()));
+        assert_eq!(
+            config.aliases.get("ls"),
+            Some(&"conversation list".to_string())
+        );
     }
 
     #[test]

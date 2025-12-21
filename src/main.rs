@@ -5,8 +5,8 @@ use std::io::{self, IsTerminal, Read};
 
 use groovehq_cli::api::{GrooveClient, MAX_ITEMS_PER_PAGE};
 use groovehq_cli::cli::{
-    self, CannedRepliesAction, Cli, Commands, ConfigAction, ConversationAction, FolderAction,
-    OutputFormat, TagAction, print_completions,
+    self, print_completions, CannedRepliesAction, Cli, Commands, ConfigAction, ConversationAction,
+    FolderAction, OutputFormat, TagAction,
 };
 use groovehq_cli::config::{self, Config};
 use groovehq_cli::error;
@@ -146,7 +146,9 @@ async fn handle_conversation(
             after,
         } => {
             // Apply config defaults: CLI arg > config default > hardcoded default
-            let limit = limit.or(config.defaults.limit).unwrap_or(DEFAULT_CONVERSATION_LIMIT);
+            let limit = limit
+                .or(config.defaults.limit)
+                .unwrap_or(DEFAULT_CONVERSATION_LIMIT);
             let folder = folder.as_ref().or(config.defaults.folder.as_ref());
             let response = client
                 .conversations(
@@ -162,11 +164,17 @@ async fn handle_conversation(
 
         ConversationAction::View { number, full } => {
             let conv = get_conversation(client, *number).await?;
-            let messages = client.messages(&conv.id, Some(DEFAULT_MESSAGE_LIMIT)).await?;
+            let messages = client
+                .messages(&conv.id, Some(DEFAULT_MESSAGE_LIMIT))
+                .await?;
             cli::format_conversation_detail(&conv, &messages, *full);
         }
 
-        ConversationAction::Reply { number, body, canned } => {
+        ConversationAction::Reply {
+            number,
+            body,
+            canned,
+        } => {
             let body = if let Some(canned_name) = canned {
                 let canned_replies = client.canned_replies().await?;
                 let canned_reply = canned_replies
@@ -210,7 +218,10 @@ async fn handle_conversation(
             let until = parse_duration(duration)?;
             let conv = get_conversation(client, *number).await?;
             client.snooze(&conv.id, &until).await?;
-            success_msg(quiet, format!("Snoozed conversation #{} until {}", number, until));
+            success_msg(
+                quiet,
+                format!("Snoozed conversation #{} until {}", number, until),
+            );
         }
 
         ConversationAction::Assign { number, agent } => {
@@ -228,7 +239,10 @@ async fn handle_conversation(
             };
 
             client.assign(&conv.id, &agent_id).await?;
-            success_msg(quiet, format!("Assigned conversation #{} to {}", number, agent));
+            success_msg(
+                quiet,
+                format!("Assigned conversation #{} to {}", number, agent),
+            );
         }
 
         ConversationAction::Unassign { numbers } => {
@@ -494,14 +508,20 @@ mod tests {
     fn test_parse_duration_invalid_unit() {
         let result = parse_duration("5x");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid duration unit"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid duration unit"));
     }
 
     #[test]
     fn test_parse_duration_invalid_number() {
         let result = parse_duration("abch");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid duration number"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid duration number"));
     }
 
     #[test]

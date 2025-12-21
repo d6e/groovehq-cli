@@ -136,8 +136,8 @@ impl GrooveClient {
                     if attempts >= MAX_RETRIES {
                         return Err(GrooveError::RateLimited { retry_after });
                     }
-                    let wait_secs = retry_after
-                        .unwrap_or(INITIAL_BACKOFF_SECS * 2u64.pow(attempts - 1));
+                    let wait_secs =
+                        retry_after.unwrap_or(INITIAL_BACKOFF_SECS * 2u64.pow(attempts - 1));
                     eprintln!(
                         "Rate limited. Retrying in {} seconds... (attempt {}/{})",
                         wait_secs, attempts, MAX_RETRIES
@@ -300,7 +300,11 @@ impl GrooveClient {
             .ok_or(GrooveError::ConversationNotFound(number))
     }
 
-    pub async fn messages(&self, conversation_id: &str, first: Option<i32>) -> Result<Vec<Message>> {
+    pub async fn messages(
+        &self,
+        conversation_id: &str,
+        first: Option<i32>,
+    ) -> Result<Vec<Message>> {
         #[derive(Deserialize)]
         struct Response {
             node: Option<ConversationWithMessages>,
@@ -352,10 +356,7 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute_with_retry(query, Some(variables)).await?;
-        Ok(response
-            .node
-            .map(|n| n.messages.nodes)
-            .unwrap_or_default())
+        Ok(response.node.map(|n| n.messages.nodes).unwrap_or_default())
     }
 
     pub async fn folders(&self) -> Result<Vec<Folder>> {
@@ -473,7 +474,8 @@ impl GrooveClient {
     }
 
     pub async fn close(&self, conversation_id: &str) -> Result<()> {
-        self.update_state(conversation_id, "conversationClose").await
+        self.update_state(conversation_id, "conversationClose")
+            .await
     }
 
     pub async fn open(&self, conversation_id: &str) -> Result<()> {

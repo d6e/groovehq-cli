@@ -44,10 +44,7 @@ fn test_config_path() {
 
 #[test]
 fn test_invalid_subcommand() {
-    groove()
-        .arg("invalid")
-        .assert()
-        .failure();
+    groove().arg("invalid").assert().failure();
 }
 
 #[test]
@@ -133,63 +130,39 @@ fn test_format_flag() {
 #[test]
 fn test_conversation_aliases() {
     // 'conv' should work
-    groove()
-        .args(["conv", "--help"])
-        .assert()
-        .success();
+    groove().args(["conv", "--help"]).assert().success();
 
     // 'c' should work
-    groove()
-        .args(["c", "--help"])
-        .assert()
-        .success();
+    groove().args(["c", "--help"]).assert().success();
 }
 
 #[test]
 fn test_folder_alias() {
-    groove()
-        .args(["f", "--help"])
-        .assert()
-        .success();
+    groove().args(["f", "--help"]).assert().success();
 }
 
 #[test]
 fn test_tag_alias() {
-    groove()
-        .args(["t", "--help"])
-        .assert()
-        .success();
+    groove().args(["t", "--help"]).assert().success();
 }
 
 #[test]
 fn test_canned_replies_alias() {
-    groove()
-        .args(["canned", "--help"])
-        .assert()
-        .success();
+    groove().args(["canned", "--help"]).assert().success();
 }
 
 #[test]
 fn test_conversation_list_aliases() {
     // 'ls' should work
-    groove()
-        .args(["conv", "ls", "--help"])
-        .assert()
-        .success();
+    groove().args(["conv", "ls", "--help"]).assert().success();
 
     // 'l' should work
-    groove()
-        .args(["conv", "l", "--help"])
-        .assert()
-        .success();
+    groove().args(["conv", "l", "--help"]).assert().success();
 }
 
 #[test]
 fn test_conversation_reply_alias() {
-    groove()
-        .args(["conv", "r", "--help"])
-        .assert()
-        .success();
+    groove().args(["conv", "r", "--help"]).assert().success();
 }
 
 #[test]

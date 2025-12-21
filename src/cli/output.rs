@@ -69,7 +69,11 @@ pub fn format_conversations(response: &ConversationsResponse, format: &OutputFor
 
 pub fn format_conversation_detail(conv: &Conversation, messages: &[Message], full: bool) {
     println!("{}", "─".repeat(60).dimmed());
-    println!("{} #{}", "Conversation".bold(), conv.number.to_string().bold());
+    println!(
+        "{} #{}",
+        "Conversation".bold(),
+        conv.number.to_string().bold()
+    );
     println!("{}", "─".repeat(60).dimmed());
 
     if let Some(subject) = &conv.subject {
@@ -268,7 +272,11 @@ pub fn format_agent(agent: &CurrentAgent, format: &OutputFormat) {
             );
         }
         _ => {
-            println!("{}: {}", "Name".dimmed(), agent.name.as_deref().unwrap_or("-"));
+            println!(
+                "{}: {}",
+                "Name".dimmed(),
+                agent.name.as_deref().unwrap_or("-")
+            );
             println!("{}: {}", "Email".dimmed(), agent.email);
             if let Some(role) = &agent.role {
                 println!("{}: {}", "Role".dimmed(), role);
@@ -343,7 +351,10 @@ fn truncate_lines(s: &str, max_lines: usize) -> String {
         s.to_string()
     } else {
         let truncated: Vec<&str> = lines.into_iter().take(max_lines).collect();
-        format!("{}\n  [... truncated, use --full to see all]", truncated.join("\n"))
+        format!(
+            "{}\n  [... truncated, use --full to see all]",
+            truncated.join("\n")
+        )
     }
 }
 

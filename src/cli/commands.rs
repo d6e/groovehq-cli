@@ -3,7 +3,11 @@ use clap_complete::{generate, Shell};
 
 #[derive(Parser)]
 #[command(name = "groove")]
-#[command(author, version, about = "GrooveHQ CLI - Manage your inbox from the terminal")]
+#[command(
+    author,
+    version,
+    about = "GrooveHQ CLI - Manage your inbox from the terminal"
+)]
 pub struct Cli {
     /// Output format (table, json, compact)
     #[arg(long, global = true)]
@@ -242,7 +246,10 @@ impl std::str::FromStr for OutputFormat {
             "table" => Ok(OutputFormat::Table),
             "json" => Ok(OutputFormat::Json),
             "compact" => Ok(OutputFormat::Compact),
-            _ => Err(format!("Invalid format: {}. Use table, json, or compact", s)),
+            _ => Err(format!(
+                "Invalid format: {}. Use table, json, or compact",
+                s
+            )),
         }
     }
 }

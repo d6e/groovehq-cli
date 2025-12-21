@@ -134,7 +134,10 @@ async fn test_conversations_list() {
         .await;
 
     let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
-    let result = client.conversations(Some(25), None, None, None, None).await.unwrap();
+    let result = client
+        .conversations(Some(25), None, None, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(result.nodes.len(), 1);
     assert_eq!(result.nodes[0].number, 1);

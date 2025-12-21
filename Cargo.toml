@@ -35,4 +35,3 @@ chrono = { version = "0.4", features = ["serde"] }
 # Terminal output
 colored = "2.1"
 comfy-table = "7.1"
-atty = "0.2"

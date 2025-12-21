@@ -1,7 +1,6 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum GrooveError {
     #[error("Authentication failed: {0}")]
     AuthError(String),
@@ -12,9 +11,6 @@ pub enum GrooveError {
     #[error("Conversation #{0} not found")]
     ConversationNotFound(i64),
 
-    #[error("Folder '{0}' not found")]
-    FolderNotFound(String),
-
     #[error("Tag '{0}' not found")]
     TagNotFound(String),
 
@@ -23,9 +19,6 @@ pub enum GrooveError {
 
     #[error("Canned reply '{0}' not found")]
     CannedReplyNotFound(String),
-
-    #[error("Invalid duration format: {0}. Use formats like '1h', '2d', '1w'")]
-    InvalidDuration(String),
 
     #[error("GraphQL error: {0}")]
     GraphQL(String),
@@ -45,7 +38,10 @@ pub enum GrooveError {
     #[error("TOML parse error: {0}")]
     TomlParse(#[from] toml::de::Error),
 
-    #[error("Rate limited. Please wait and try again")]
+    #[error("Rate limited{}", match .retry_after {
+        Some(secs) => format!(". Retry after {} seconds", secs),
+        None => ". Please wait and try again".to_string(),
+    })]
     RateLimited { retry_after: Option<u64> },
 }
 

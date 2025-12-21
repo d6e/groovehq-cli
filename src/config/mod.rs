@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub api_token: Option<String>,
     pub api_endpoint: Option<String>,
@@ -20,10 +20,10 @@ pub struct Config {
     pub aliases: HashMap<String, String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DefaultSettings {
     pub format: Option<String>,
-    pub limit: Option<i32>,
+    pub limit: Option<u32>,
     pub folder: Option<String>,
 }
 

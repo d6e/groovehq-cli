@@ -73,9 +73,9 @@ pub enum ConversationAction {
         #[arg(short = 'q', long)]
         search: Option<String>,
 
-        /// Number of results to show
-        #[arg(short = 'n', long, default_value = "25")]
-        limit: i32,
+        /// Number of results to show (default: 25, or from config)
+        #[arg(short = 'n', long)]
+        limit: Option<u32>,
 
         /// Cursor for pagination
         #[arg(long)]

@@ -7,7 +7,7 @@ mod types;
 use anyhow::Context;
 use chrono::{Duration, Utc};
 use clap::Parser;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 
 use api::GrooveClient;
 use cli::{
@@ -42,7 +42,7 @@ async fn run() -> anyhow::Result<()> {
         _ => {
             let token = config::resolve_token(cli.token.as_deref(), &config)?;
             let client = GrooveClient::new(&token, config.api_endpoint.as_deref())?;
-            handle_command(&cli.command, &client, &cli.format).await?;
+            handle_command(&cli.command, &client, &cli.format, &config).await?;
         }
     }
 
@@ -53,7 +53,11 @@ fn handle_config(action: &ConfigAction, config: &Config) -> anyhow::Result<()> {
     match action {
         ConfigAction::Show => {
             if let Some(token) = &config.api_token {
-                let masked = format!("{}...{}", &token[..4], &token[token.len() - 4..]);
+                let masked = if token.len() >= 8 {
+                    format!("{}...{}", &token[..4], &token[token.len() - 4..])
+                } else {
+                    "***".to_string()
+                };
                 println!("api_token: {}", masked);
             } else {
                 println!("api_token: (not set)");
@@ -82,6 +86,7 @@ async fn handle_command(
     command: &Commands,
     client: &GrooveClient,
     format: &OutputFormat,
+    config: &Config,
 ) -> anyhow::Result<()> {
     match command {
         Commands::Me => {
@@ -90,7 +95,7 @@ async fn handle_command(
         }
 
         Commands::Conversation { action } => {
-            handle_conversation(action, client, format).await?;
+            handle_conversation(action, client, format, config).await?;
         }
 
         Commands::Folder { action } => {
@@ -115,6 +120,7 @@ async fn handle_conversation(
     action: &ConversationAction,
     client: &GrooveClient,
     format: &OutputFormat,
+    config: &Config,
 ) -> anyhow::Result<()> {
     match action {
         ConversationAction::List {
@@ -124,9 +130,11 @@ async fn handle_conversation(
             limit,
             after,
         } => {
+            // Apply config defaults: CLI arg > config default > hardcoded default
+            let limit = limit.or(config.defaults.limit).unwrap_or(25);
             let response = client
                 .conversations(
-                    Some(*limit),
+                    Some(limit),
                     after.clone(),
                     status.as_deref(),
                     folder.as_deref(),
@@ -275,7 +283,7 @@ fn get_body(body_arg: Option<String>) -> anyhow::Result<String> {
     }
 
     // Check if stdin has data (not a TTY)
-    if atty::is(atty::Stream::Stdin) {
+    if io::stdin().is_terminal() {
         anyhow::bail!("No body provided. Pass as argument or pipe content via stdin");
     }
 
@@ -315,19 +323,4 @@ fn parse_duration(s: &str) -> anyhow::Result<String> {
 
     let until = Utc::now() + duration;
     Ok(until.to_rfc3339())
-}
-
-impl Clone for Config {
-    fn clone(&self) -> Self {
-        Config {
-            api_token: self.api_token.clone(),
-            api_endpoint: self.api_endpoint.clone(),
-            defaults: config::DefaultSettings {
-                format: self.defaults.format.clone(),
-                limit: self.defaults.limit,
-                folder: self.defaults.folder.clone(),
-            },
-            aliases: self.aliases.clone(),
-        }
-    }
 }

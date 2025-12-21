@@ -3,8 +3,36 @@ use crate::types::*;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::time::Duration;
 
 const DEFAULT_ENDPOINT: &str = "https://api.groovehq.com/v2/graphql";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Deserialize)]
+struct MutationResult {
+    errors: Vec<MutationError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MutationError {
+    message: String,
+}
+
+impl MutationResult {
+    fn into_result(self) -> Result<()> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            let msg = self
+                .errors
+                .iter()
+                .map(|e| e.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            Err(GrooveError::GraphQL(msg))
+        }
+    }
+}
 
 pub struct GrooveClient {
     client: Client,
@@ -26,6 +54,7 @@ struct GraphQLError {
 impl GrooveClient {
     pub fn new(token: &str, endpoint: Option<&str>) -> Result<Self> {
         let client = Client::builder()
+            .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(GrooveError::Network)?;
 
@@ -58,7 +87,12 @@ impl GrooveClient {
         let status = response.status();
 
         if status == 429 {
-            return Err(GrooveError::RateLimited { retry_after: None });
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok());
+            return Err(GrooveError::RateLimited { retry_after });
         }
 
         if status == 401 {
@@ -104,7 +138,7 @@ impl GrooveClient {
 
     pub async fn conversations(
         &self,
-        first: Option<i32>,
+        first: Option<u32>,
         after: Option<String>,
         state: Option<&str>,
         folder_id: Option<&str>,
@@ -377,17 +411,7 @@ impl GrooveClient {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            conversation_reply: MutationResponse,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            conversation_reply: MutationResult,
         }
 
         let query = r#"
@@ -408,17 +432,7 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute(query, Some(variables)).await?;
-        if !response.conversation_reply.errors.is_empty() {
-            let msg = response
-                .conversation_reply
-                .errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(GrooveError::GraphQL(msg));
-        }
-        Ok(())
+        response.conversation_reply.into_result()
     }
 
     pub async fn close(&self, conversation_id: &str) -> Result<()> {
@@ -446,17 +460,7 @@ impl GrooveClient {
         #[derive(Deserialize)]
         struct Response {
             #[serde(flatten)]
-            result: std::collections::HashMap<String, MutationResponse>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            result: std::collections::HashMap<String, MutationResult>,
         }
 
         let variables = json!({
@@ -467,15 +471,7 @@ impl GrooveClient {
 
         let response: Response = self.execute(&query, Some(variables)).await?;
         for (_, result) in response.result {
-            if !result.errors.is_empty() {
-                let msg = result
-                    .errors
-                    .iter()
-                    .map(|e| e.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(GrooveError::GraphQL(msg));
-            }
+            result.into_result()?;
         }
         Ok(())
     }
@@ -484,17 +480,7 @@ impl GrooveClient {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            conversation_snooze: MutationResponse,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            conversation_snooze: MutationResult,
         }
 
         let query = r#"
@@ -515,34 +501,14 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute(query, Some(variables)).await?;
-        if !response.conversation_snooze.errors.is_empty() {
-            let msg = response
-                .conversation_snooze
-                .errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(GrooveError::GraphQL(msg));
-        }
-        Ok(())
+        response.conversation_snooze.into_result()
     }
 
     pub async fn assign(&self, conversation_id: &str, agent_id: &str) -> Result<()> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            conversation_assign: MutationResponse,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            conversation_assign: MutationResult,
         }
 
         let query = r#"
@@ -563,34 +529,14 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute(query, Some(variables)).await?;
-        if !response.conversation_assign.errors.is_empty() {
-            let msg = response
-                .conversation_assign
-                .errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(GrooveError::GraphQL(msg));
-        }
-        Ok(())
+        response.conversation_assign.into_result()
     }
 
     pub async fn add_note(&self, conversation_id: &str, body: &str) -> Result<()> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            conversation_add_note: MutationResponse,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            conversation_add_note: MutationResult,
         }
 
         let query = r#"
@@ -611,34 +557,14 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute(query, Some(variables)).await?;
-        if !response.conversation_add_note.errors.is_empty() {
-            let msg = response
-                .conversation_add_note
-                .errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(GrooveError::GraphQL(msg));
-        }
-        Ok(())
+        response.conversation_add_note.into_result()
     }
 
     pub async fn tag(&self, conversation_id: &str, tag_ids: Vec<String>) -> Result<()> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            conversation_tag: MutationResponse,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationResponse {
-            errors: Vec<MutationError>,
-        }
-
-        #[derive(Deserialize)]
-        struct MutationError {
-            message: String,
+            conversation_tag: MutationResult,
         }
 
         let query = r#"
@@ -659,17 +585,7 @@ impl GrooveClient {
         });
 
         let response: Response = self.execute(query, Some(variables)).await?;
-        if !response.conversation_tag.errors.is_empty() {
-            let msg = response
-                .conversation_tag
-                .errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(GrooveError::GraphQL(msg));
-        }
-        Ok(())
+        response.conversation_tag.into_result()
     }
 
     pub async fn agents(&self) -> Result<Vec<Agent>> {

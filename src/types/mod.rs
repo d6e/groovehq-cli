@@ -126,13 +126,8 @@ pub struct CurrentAgent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PageInfo {
-    #[serde(rename = "hasNextPage")]
     pub has_next_page: bool,
-    #[serde(rename = "hasPreviousPage")]
-    pub has_previous_page: bool,
-    #[serde(rename = "startCursor")]
-    pub start_cursor: Option<String>,
-    #[serde(rename = "endCursor")]
     pub end_cursor: Option<String>,
 }

@@ -7,6 +7,12 @@ use std::time::Duration;
 
 const DEFAULT_ENDPOINT: &str = "https://api.groovehq.com/v2/graphql";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_MESSAGES_LIMIT: i32 = 50;
+const MAX_RETRIES: u32 = 3;
+const INITIAL_BACKOFF_SECS: u64 = 1;
+
+/// Maximum items returned per API page for folders, tags, agents, and canned replies.
+pub const MAX_ITEMS_PER_PAGE: usize = 100;
 
 #[derive(Debug, Deserialize)]
 struct MutationResult {
@@ -115,6 +121,34 @@ impl GrooveClient {
             .ok_or_else(|| GrooveError::GraphQL("No data in response".into()))
     }
 
+    async fn execute_with_retry<T: for<'de> Deserialize<'de>>(
+        &self,
+        query: &str,
+        variables: Option<Value>,
+    ) -> Result<T> {
+        let mut attempts = 0;
+        loop {
+            let vars = variables.clone();
+            match self.execute(query, vars).await {
+                Ok(result) => return Ok(result),
+                Err(GrooveError::RateLimited { retry_after }) => {
+                    attempts += 1;
+                    if attempts >= MAX_RETRIES {
+                        return Err(GrooveError::RateLimited { retry_after });
+                    }
+                    let wait_secs = retry_after
+                        .unwrap_or(INITIAL_BACKOFF_SECS * 2u64.pow(attempts - 1));
+                    eprintln!(
+                        "Rate limited. Retrying in {} seconds... (attempt {}/{})",
+                        wait_secs, attempts, MAX_RETRIES
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     pub async fn me(&self) -> Result<CurrentAgent> {
         #[derive(Deserialize)]
         struct Response {
@@ -132,7 +166,7 @@ impl GrooveClient {
             }
         "#;
 
-        let response: Response = self.execute(query, None).await?;
+        let response: Response = self.execute_with_retry(query, None).await?;
         Ok(response.me)
     }
 
@@ -213,7 +247,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response.conversations)
     }
 
@@ -260,7 +294,7 @@ impl GrooveClient {
         "#;
 
         let variables = json!({ "number": number });
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response
             .conversation
             .ok_or(GrooveError::ConversationNotFound(number))
@@ -314,10 +348,10 @@ impl GrooveClient {
 
         let variables = json!({
             "id": conversation_id,
-            "first": first.unwrap_or(50)
+            "first": first.unwrap_or(DEFAULT_MESSAGES_LIMIT)
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response
             .node
             .map(|n| n.messages.nodes)
@@ -336,8 +370,8 @@ impl GrooveClient {
         }
 
         let query = r#"
-            query {
-                folders(first: 100) {
+            query Folders($first: Int!) {
+                folders(first: $first) {
                     nodes {
                         id
                         name
@@ -347,7 +381,8 @@ impl GrooveClient {
             }
         "#;
 
-        let response: Response = self.execute(query, None).await?;
+        let variables = json!({ "first": MAX_ITEMS_PER_PAGE as i32 });
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response.folders.nodes)
     }
 
@@ -363,8 +398,8 @@ impl GrooveClient {
         }
 
         let query = r#"
-            query {
-                tags(first: 100) {
+            query Tags($first: Int!) {
+                tags(first: $first) {
                     nodes {
                         id
                         name
@@ -374,7 +409,8 @@ impl GrooveClient {
             }
         "#;
 
-        let response: Response = self.execute(query, None).await?;
+        let variables = json!({ "first": MAX_ITEMS_PER_PAGE as i32 });
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response.tags.nodes)
     }
 
@@ -391,8 +427,8 @@ impl GrooveClient {
         }
 
         let query = r#"
-            query {
-                cannedReplies(first: 100) {
+            query CannedReplies($first: Int!) {
+                cannedReplies(first: $first) {
                     nodes {
                         id
                         name
@@ -403,7 +439,8 @@ impl GrooveClient {
             }
         "#;
 
-        let response: Response = self.execute(query, None).await?;
+        let variables = json!({ "first": MAX_ITEMS_PER_PAGE as i32 });
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response.canned_replies.nodes)
     }
 
@@ -431,7 +468,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_reply.into_result()
     }
 
@@ -469,7 +506,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(&query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(&query, Some(variables)).await?;
         for (_, result) in response.result {
             result.into_result()?;
         }
@@ -500,7 +537,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_snooze.into_result()
     }
 
@@ -528,7 +565,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_assign.into_result()
     }
 
@@ -555,7 +592,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_unassign.into_result()
     }
 
@@ -583,7 +620,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_add_note.into_result()
     }
 
@@ -611,7 +648,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_tag.into_result()
     }
 
@@ -639,7 +676,7 @@ impl GrooveClient {
             }
         });
 
-        let response: Response = self.execute(query, Some(variables)).await?;
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         response.conversation_untag.into_result()
     }
 
@@ -655,8 +692,8 @@ impl GrooveClient {
         }
 
         let query = r#"
-            query {
-                agents(first: 100) {
+            query Agents($first: Int!) {
+                agents(first: $first) {
                     nodes {
                         id
                         email
@@ -666,7 +703,8 @@ impl GrooveClient {
             }
         "#;
 
-        let response: Response = self.execute(query, None).await?;
+        let variables = json!({ "first": MAX_ITEMS_PER_PAGE as i32 });
+        let response: Response = self.execute_with_retry(query, Some(variables)).await?;
         Ok(response.agents.nodes)
     }
 }

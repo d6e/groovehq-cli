@@ -1,94 +1,7 @@
+use groovehq_cli::api::GrooveClient;
 use serde_json::json;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-// Re-create a minimal client for testing (since GrooveClient isn't exported as pub)
-// In a real scenario, we'd export the client module as pub
-mod helpers {
-    use serde_json::{json, Value};
-    use std::time::Duration;
-
-    pub struct TestClient {
-        client: reqwest::Client,
-        endpoint: String,
-        token: String,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    pub struct GraphQLResponse<T> {
-        pub data: Option<T>,
-        pub errors: Option<Vec<GraphQLError>>,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    pub struct GraphQLError {
-        pub message: String,
-    }
-
-    impl TestClient {
-        pub fn new(token: &str, endpoint: &str) -> Self {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .unwrap();
-
-            Self {
-                client,
-                endpoint: endpoint.to_string(),
-                token: token.to_string(),
-            }
-        }
-
-        pub async fn execute<T: for<'de> serde::Deserialize<'de>>(
-            &self,
-            query: &str,
-            variables: Option<Value>,
-        ) -> Result<T, String> {
-            let body = json!({
-                "query": query,
-                "variables": variables.unwrap_or(json!({}))
-            });
-
-            let response = self
-                .client
-                .post(&self.endpoint)
-                .header("Authorization", format!("Bearer {}", self.token))
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-
-            let status = response.status();
-
-            if status == 429 {
-                return Err("Rate limited".to_string());
-            }
-
-            if status == 401 {
-                return Err("Unauthorized".to_string());
-            }
-
-            let response_body: GraphQLResponse<T> =
-                response.json().await.map_err(|e| e.to_string())?;
-
-            if let Some(errors) = response_body.errors {
-                let msg = errors
-                    .iter()
-                    .map(|e| e.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return Err(format!("GraphQL error: {}", msg));
-            }
-
-            response_body
-                .data
-                .ok_or_else(|| "No data in response".to_string())
-        }
-    }
-}
-
-use helpers::TestClient;
 
 #[tokio::test]
 async fn test_me_query() {
@@ -110,27 +23,12 @@ async fn test_me_query() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.me().await.unwrap();
 
-    #[derive(Debug, serde::Deserialize)]
-    struct MeResponse {
-        me: Me,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct Me {
-        id: String,
-        email: String,
-        name: Option<String>,
-        role: Option<String>,
-    }
-
-    let query = r#"query { me { id email name role } }"#;
-    let result: MeResponse = client.execute(query, None).await.unwrap();
-
-    assert_eq!(result.me.email, "test@example.com");
-    assert_eq!(result.me.name, Some("Test User".to_string()));
-    assert_eq!(result.me.role, Some("admin".to_string()));
+    assert_eq!(result.email, "test@example.com");
+    assert_eq!(result.name, Some("Test User".to_string()));
+    assert_eq!(result.role, Some("admin".to_string()));
 }
 
 #[tokio::test]
@@ -143,16 +41,12 @@ async fn test_auth_error() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("invalid-token", &mock_server.uri());
-
-    #[derive(Debug, serde::Deserialize)]
-    struct DummyResponse {}
-
-    let query = r#"query { me { id } }"#;
-    let result: Result<DummyResponse, String> = client.execute(query, None).await;
+    let client = GrooveClient::new("invalid-token", Some(&mock_server.uri())).unwrap();
+    let result = client.me().await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Unauthorized"));
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Authentication failed"));
 }
 
 #[tokio::test]
@@ -161,22 +55,16 @@ async fn test_rate_limiting() {
 
     Mock::given(method("POST"))
         .and(path("/"))
-        .respond_with(
-            ResponseTemplate::new(429).insert_header("Retry-After", "60"),
-        )
+        .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "60"))
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
-
-    #[derive(Debug, serde::Deserialize)]
-    struct DummyResponse {}
-
-    let query = r#"query { me { id } }"#;
-    let result: Result<DummyResponse, String> = client.execute(query, None).await;
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.me().await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Rate limited"));
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Rate limited"));
 }
 
 #[tokio::test]
@@ -194,18 +82,12 @@ async fn test_graphql_error() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
-
-    #[derive(Debug, serde::Deserialize)]
-    struct DummyResponse {}
-
-    let query = r#"query { conversation(number: 999) { id } }"#;
-    let result: Result<DummyResponse, String> = client.execute(query, None).await;
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.conversation(999).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("GraphQL error"));
-    assert!(err.contains("Conversation not found"));
+    assert!(err.to_string().contains("Conversation not found"));
 }
 
 #[tokio::test]
@@ -251,49 +133,82 @@ async fn test_conversations_list() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.conversations(Some(25), None, None, None, None).await.unwrap();
 
-    #[derive(Debug, serde::Deserialize)]
-    struct ConversationsResponse {
-        conversations: Conversations,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Conversations {
-        nodes: Vec<Conversation>,
-        page_info: PageInfo,
-        total_count: i32,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct Conversation {
-        id: String,
-        number: i64,
-        subject: Option<String>,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct PageInfo {
-        has_next_page: bool,
-        end_cursor: Option<String>,
-    }
-
-    let query = r#"query { conversations(first: 25) { nodes { id number subject } pageInfo { hasNextPage endCursor } totalCount } }"#;
-    let result: ConversationsResponse = client.execute(query, None).await.unwrap();
-
-    assert_eq!(result.conversations.nodes.len(), 1);
-    assert_eq!(result.conversations.nodes[0].number, 1);
-    assert_eq!(
-        result.conversations.nodes[0].subject,
-        Some("Test Subject".to_string())
-    );
-    assert_eq!(result.conversations.total_count, 1);
+    assert_eq!(result.nodes.len(), 1);
+    assert_eq!(result.nodes[0].number, 1);
+    assert_eq!(result.nodes[0].subject, Some("Test Subject".to_string()));
+    assert_eq!(result.total_count, 1);
 }
 
 #[tokio::test]
-async fn test_mutation_success() {
+async fn test_folders_list() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "folders": {
+                    "nodes": [
+                        {
+                            "id": "folder-1",
+                            "name": "Inbox",
+                            "count": 42
+                        },
+                        {
+                            "id": "folder-2",
+                            "name": "Archive",
+                            "count": 100
+                        }
+                    ]
+                }
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.folders().await.unwrap();
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].name, "Inbox");
+    assert_eq!(result[0].count, Some(42));
+}
+
+#[tokio::test]
+async fn test_tags_list() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": {
+                "tags": {
+                    "nodes": [
+                        {
+                            "id": "tag-1",
+                            "name": "urgent",
+                            "color": "#ff0000"
+                        }
+                    ]
+                }
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.tags().await.unwrap();
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].name, "urgent");
+    assert_eq!(result[0].color, Some("#ff0000".to_string()));
+}
+
+#[tokio::test]
+async fn test_close_conversation() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -308,28 +223,10 @@ async fn test_mutation_success() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.close("conv-1").await;
 
-    #[derive(Debug, serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct CloseResponse {
-        conversation_close: MutationResult,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct MutationResult {
-        errors: Vec<MutationError>,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct MutationError {
-        message: String,
-    }
-
-    let query = r#"mutation { conversationClose(input: { conversationId: "conv-1" }) { errors { message } } }"#;
-    let result: CloseResponse = client.execute(query, None).await.unwrap();
-
-    assert!(result.conversation_close.errors.is_empty());
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
@@ -350,30 +247,10 @@ async fn test_mutation_with_errors() {
         .mount(&mock_server)
         .await;
 
-    let client = TestClient::new("test-token", &mock_server.uri());
+    let client = GrooveClient::new("test-token", Some(&mock_server.uri())).unwrap();
+    let result = client.close("conv-1").await;
 
-    #[derive(Debug, serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct CloseResponse {
-        conversation_close: MutationResult,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct MutationResult {
-        errors: Vec<MutationError>,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct MutationError {
-        message: String,
-    }
-
-    let query = r#"mutation { conversationClose(input: { conversationId: "conv-1" }) { errors { message } } }"#;
-    let result: CloseResponse = client.execute(query, None).await.unwrap();
-
-    assert_eq!(result.conversation_close.errors.len(), 1);
-    assert_eq!(
-        result.conversation_close.errors[0].message,
-        "Conversation is already closed"
-    );
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("already closed"));
 }

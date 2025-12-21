@@ -8,7 +8,10 @@ use comfy_table::{presets::UTF8_FULL_CONDENSED, Cell, Color, ContentArrangement,
 pub fn format_conversations(response: &ConversationsResponse, format: &OutputFormat) {
     match format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(response).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(response).expect("serialization should not fail")
+            );
         }
         OutputFormat::Compact => {
             for conv in &response.nodes {
@@ -151,7 +154,10 @@ fn print_message(msg: &Message, full: bool) {
 pub fn format_folders(folders: &[Folder], format: &OutputFormat) {
     match format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(folders).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(folders).expect("serialization should not fail")
+            );
         }
         OutputFormat::Compact => {
             for folder in folders {
@@ -181,7 +187,10 @@ pub fn format_folders(folders: &[Folder], format: &OutputFormat) {
 pub fn format_tags(tags: &[Tag], format: &OutputFormat) {
     match format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(tags).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(tags).expect("serialization should not fail")
+            );
         }
         OutputFormat::Compact => {
             for tag in tags {
@@ -210,7 +219,10 @@ pub fn format_tags(tags: &[Tag], format: &OutputFormat) {
 pub fn format_canned_replies(replies: &[CannedReply], format: &OutputFormat) {
     match format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(replies).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(replies).expect("serialization should not fail")
+            );
         }
         OutputFormat::Compact => {
             for reply in replies {
@@ -250,7 +262,10 @@ pub fn format_canned_reply(reply: &CannedReply) {
 pub fn format_agent(agent: &CurrentAgent, format: &OutputFormat) {
     match format {
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(agent).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(agent).expect("serialization should not fail")
+            );
         }
         _ => {
             println!("{}: {}", "Name".dimmed(), agent.name.as_deref().unwrap_or("-"));

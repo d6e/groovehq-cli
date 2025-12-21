@@ -5,9 +5,9 @@ use clap_complete::{generate, Shell};
 #[command(name = "groove")]
 #[command(author, version, about = "GrooveHQ CLI - Manage your inbox from the terminal")]
 pub struct Cli {
-    /// Output format
-    #[arg(long, global = true, default_value = "table")]
-    pub format: OutputFormat,
+    /// Output format (table, json, compact)
+    #[arg(long, global = true)]
+    pub format: Option<OutputFormat>,
 
     /// API token (overrides config file and env var)
     #[arg(long, global = true, hide_env_values = true)]
@@ -232,6 +232,19 @@ pub enum OutputFormat {
     Table,
     Json,
     Compact,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "table" => Ok(OutputFormat::Table),
+            "json" => Ok(OutputFormat::Json),
+            "compact" => Ok(OutputFormat::Compact),
+            _ => Err(format!("Invalid format: {}. Use table, json, or compact", s)),
+        }
+    }
 }
 
 pub fn print_completions(shell: Shell) {

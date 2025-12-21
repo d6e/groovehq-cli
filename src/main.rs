@@ -1,20 +1,18 @@
-mod api;
-mod cli;
-mod config;
-mod error;
-mod types;
-
 use anyhow::Context;
 use chrono::{Duration, Utc};
 use clap::Parser;
 use std::io::{self, IsTerminal, Read};
 
-use api::GrooveClient;
-use cli::{
-    CannedRepliesAction, Commands, ConfigAction, ConversationAction, FolderAction, OutputFormat,
-    TagAction, print_completions,
+use groovehq_cli::api::{GrooveClient, MAX_ITEMS_PER_PAGE};
+use groovehq_cli::cli::{
+    self, CannedRepliesAction, Cli, Commands, ConfigAction, ConversationAction, FolderAction,
+    OutputFormat, TagAction, print_completions,
 };
-use config::Config;
+use groovehq_cli::config::{self, Config};
+use groovehq_cli::error;
+
+const DEFAULT_CONVERSATION_LIMIT: u32 = 25;
+const DEFAULT_MESSAGE_LIMIT: i32 = 50;
 
 #[tokio::main]
 async fn main() {
@@ -34,18 +32,28 @@ async fn main() {
 }
 
 async fn run() -> anyhow::Result<()> {
-    let cli = cli::Cli::parse();
+    let cli = Cli::parse();
     let config = Config::load().context("Failed to load configuration")?;
 
+    // Resolve format: CLI flag > config default > "table"
+    let format = cli.format.unwrap_or_else(|| {
+        config
+            .defaults
+            .format
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(OutputFormat::Table)
+    });
+
     match &cli.command {
-        Commands::Config { action } => handle_config(action, &config, cli.quiet)?,
+        Commands::Config { action } => handle_config(&action, &config, cli.quiet)?,
         Commands::Completions { shell } => {
-            print_completions(*shell);
+            print_completions(shell.clone());
         }
         _ => {
             let token = config::resolve_token(cli.token.as_deref(), &config)?;
             let client = GrooveClient::new(&token, config.api_endpoint.as_deref())?;
-            handle_command(&cli.command, &client, &cli.format, &config, cli.quiet).await?;
+            handle_command(&cli.command, &client, &format, &config, cli.quiet).await?;
         }
     }
 
@@ -56,10 +64,10 @@ fn handle_config(action: &ConfigAction, config: &Config, quiet: bool) -> anyhow:
     match action {
         ConfigAction::Show => {
             if let Some(token) = &config.api_token {
-                let masked = if token.len() >= 8 {
+                let masked = if token.len() > 8 {
                     format!("{}...{}", &token[..4], &token[token.len() - 4..])
                 } else {
-                    "***".to_string()
+                    "********".to_string()
                 };
                 println!("api_token: {}", masked);
             } else {
@@ -138,13 +146,14 @@ async fn handle_conversation(
             after,
         } => {
             // Apply config defaults: CLI arg > config default > hardcoded default
-            let limit = limit.or(config.defaults.limit).unwrap_or(25);
+            let limit = limit.or(config.defaults.limit).unwrap_or(DEFAULT_CONVERSATION_LIMIT);
+            let folder = folder.as_ref().or(config.defaults.folder.as_ref());
             let response = client
                 .conversations(
                     Some(limit),
                     after.clone(),
                     status.as_deref(),
-                    folder.as_deref(),
+                    folder.map(|s| s.as_str()),
                     search.as_deref(),
                 )
                 .await?;
@@ -152,16 +161,13 @@ async fn handle_conversation(
         }
 
         ConversationAction::View { number, full } => {
-            validate_conversation_number(*number)?;
-            let conv = client.conversation(*number).await?;
-            let messages = client.messages(&conv.id, None).await?;
+            let conv = get_conversation(client, *number).await?;
+            let messages = client.messages(&conv.id, Some(DEFAULT_MESSAGE_LIMIT)).await?;
             cli::format_conversation_detail(&conv, &messages, *full);
         }
 
         ConversationAction::Reply { number, body, canned } => {
-            validate_conversation_number(*number)?;
             let body = if let Some(canned_name) = canned {
-                // Look up canned reply
                 let canned_replies = client.canned_replies().await?;
                 let canned_reply = canned_replies
                     .iter()
@@ -169,63 +175,49 @@ async fn handle_conversation(
                     .ok_or_else(|| error::GrooveError::CannedReplyNotFound(canned_name.clone()))?;
 
                 let canned_body = canned_reply.body.clone().unwrap_or_default();
-
-                // Optionally append custom text
-                if let Some(extra) = body {
-                    format!("{}\n\n{}", canned_body, extra)
-                } else {
-                    canned_body
+                match body {
+                    Some(extra) => format!("{}\n\n{}", canned_body, extra),
+                    None => canned_body,
                 }
             } else {
                 get_body(body.clone())?
             };
 
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
             client.reply(&conv.id, &body).await?;
-            if !quiet {
-                println!("Reply sent to conversation #{}", number);
-            }
+            success_msg(quiet, format!("Reply sent to conversation #{}", number));
         }
 
         ConversationAction::Close { numbers } => {
             validate_conversation_numbers(numbers)?;
             for number in numbers {
-                let conv = client.conversation(*number).await?;
+                let conv = get_conversation(client, *number).await?;
                 client.close(&conv.id).await?;
-                if !quiet {
-                    println!("Closed conversation #{}", number);
-                }
+                success_msg(quiet, format!("Closed conversation #{}", number));
             }
         }
 
         ConversationAction::Open { numbers } => {
             validate_conversation_numbers(numbers)?;
             for number in numbers {
-                let conv = client.conversation(*number).await?;
+                let conv = get_conversation(client, *number).await?;
                 client.open(&conv.id).await?;
-                if !quiet {
-                    println!("Opened conversation #{}", number);
-                }
+                success_msg(quiet, format!("Opened conversation #{}", number));
             }
         }
 
         ConversationAction::Snooze { number, duration } => {
-            validate_conversation_number(*number)?;
             let until = parse_duration(duration)?;
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
             client.snooze(&conv.id, &until).await?;
-            if !quiet {
-                println!("Snoozed conversation #{} until {}", number, until);
-            }
+            success_msg(quiet, format!("Snoozed conversation #{} until {}", number, until));
         }
 
         ConversationAction::Assign { number, agent } => {
-            validate_conversation_number(*number)?;
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
 
             let agent_id = if agent == "me" {
-                let me = client.me().await?;
-                me.id
+                client.me().await?.id
             } else {
                 let agents = client.agents().await?;
                 agents
@@ -236,70 +228,39 @@ async fn handle_conversation(
             };
 
             client.assign(&conv.id, &agent_id).await?;
-            if !quiet {
-                println!("Assigned conversation #{} to {}", number, agent);
-            }
+            success_msg(quiet, format!("Assigned conversation #{} to {}", number, agent));
         }
 
         ConversationAction::Unassign { numbers } => {
             validate_conversation_numbers(numbers)?;
             for number in numbers {
-                let conv = client.conversation(*number).await?;
+                let conv = get_conversation(client, *number).await?;
                 client.unassign(&conv.id).await?;
-                if !quiet {
-                    println!("Unassigned conversation #{}", number);
-                }
+                success_msg(quiet, format!("Unassigned conversation #{}", number));
             }
         }
 
         ConversationAction::AddTag { number, tags } => {
-            validate_conversation_number(*number)?;
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
             let all_tags = client.tags().await?;
-
-            let mut tag_ids = Vec::new();
-            for tag_name in tags {
-                let tag = all_tags
-                    .iter()
-                    .find(|t| t.name.eq_ignore_ascii_case(tag_name))
-                    .ok_or_else(|| error::GrooveError::TagNotFound(tag_name.to_string()))?;
-                tag_ids.push(tag.id.clone());
-            }
-
+            let tag_ids = resolve_tag_ids(tags, &all_tags)?;
             client.tag(&conv.id, tag_ids).await?;
-            if !quiet {
-                println!("Added tags to conversation #{}", number);
-            }
+            success_msg(quiet, format!("Added tags to conversation #{}", number));
         }
 
         ConversationAction::RemoveTag { number, tags } => {
-            validate_conversation_number(*number)?;
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
             let all_tags = client.tags().await?;
-
-            let mut tag_ids = Vec::new();
-            for tag_name in tags {
-                let tag = all_tags
-                    .iter()
-                    .find(|t| t.name.eq_ignore_ascii_case(tag_name))
-                    .ok_or_else(|| error::GrooveError::TagNotFound(tag_name.to_string()))?;
-                tag_ids.push(tag.id.clone());
-            }
-
+            let tag_ids = resolve_tag_ids(tags, &all_tags)?;
             client.untag(&conv.id, tag_ids).await?;
-            if !quiet {
-                println!("Removed tags from conversation #{}", number);
-            }
+            success_msg(quiet, format!("Removed tags from conversation #{}", number));
         }
 
         ConversationAction::Note { number, body } => {
-            validate_conversation_number(*number)?;
             let body = get_body(body.clone())?;
-            let conv = client.conversation(*number).await?;
+            let conv = get_conversation(client, *number).await?;
             client.add_note(&conv.id, &body).await?;
-            if !quiet {
-                println!("Note added to conversation #{}", number);
-            }
+            success_msg(quiet, format!("Note added to conversation #{}", number));
         }
     }
 
@@ -315,6 +276,12 @@ async fn handle_folder(
         FolderAction::List => {
             let folders = client.folders().await?;
             cli::format_folders(&folders, format);
+            if folders.len() >= MAX_ITEMS_PER_PAGE {
+                eprintln!(
+                    "Warning: Results may be truncated (showing {} items)",
+                    MAX_ITEMS_PER_PAGE
+                );
+            }
         }
     }
     Ok(())
@@ -329,6 +296,12 @@ async fn handle_tag(
         TagAction::List => {
             let tags = client.tags().await?;
             cli::format_tags(&tags, format);
+            if tags.len() >= MAX_ITEMS_PER_PAGE {
+                eprintln!(
+                    "Warning: Results may be truncated (showing {} items)",
+                    MAX_ITEMS_PER_PAGE
+                );
+            }
         }
     }
     Ok(())
@@ -343,6 +316,12 @@ async fn handle_canned_replies(
         CannedRepliesAction::List => {
             let replies = client.canned_replies().await?;
             cli::format_canned_replies(&replies, format);
+            if replies.len() >= MAX_ITEMS_PER_PAGE {
+                eprintln!(
+                    "Warning: Results may be truncated (showing {} items)",
+                    MAX_ITEMS_PER_PAGE
+                );
+            }
         }
         CannedRepliesAction::Show { name } => {
             let replies = client.canned_replies().await?;
@@ -370,6 +349,36 @@ fn validate_conversation_numbers(numbers: &[i64]) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn get_conversation(
+    client: &GrooveClient,
+    number: i64,
+) -> anyhow::Result<groovehq_cli::types::Conversation> {
+    validate_conversation_number(number)?;
+    Ok(client.conversation(number).await?)
+}
+
+fn resolve_tag_ids(
+    tag_names: &[String],
+    all_tags: &[groovehq_cli::types::Tag],
+) -> anyhow::Result<Vec<String>> {
+    tag_names
+        .iter()
+        .map(|name| {
+            all_tags
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(name))
+                .map(|t| t.id.clone())
+                .ok_or_else(|| anyhow::anyhow!(error::GrooveError::TagNotFound(name.clone())))
+        })
+        .collect()
+}
+
+fn success_msg(quiet: bool, msg: impl std::fmt::Display) {
+    if !quiet {
+        println!("{}", msg);
+    }
+}
+
 fn get_body(body_arg: Option<String>) -> anyhow::Result<String> {
     if let Some(body) = body_arg {
         return Ok(body);
@@ -391,8 +400,13 @@ fn get_body(body_arg: Option<String>) -> anyhow::Result<String> {
 }
 
 fn parse_duration(s: &str) -> anyhow::Result<String> {
-    // If it looks like an ISO datetime, return as-is
-    if s.contains('T') || s.contains('-') {
+    // If it looks like an ISO datetime (contains T or is a date like YYYY-MM-DD), return as-is
+    let is_iso_date = s.contains('T')
+        || (s.len() >= 10
+            && s.chars().take(4).all(|c| c.is_ascii_digit())
+            && s.chars().nth(4) == Some('-'));
+
+    if is_iso_date {
         return Ok(s.to_string());
     }
 
@@ -405,6 +419,10 @@ fn parse_duration(s: &str) -> anyhow::Result<String> {
     let num: i64 = num_str
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid duration number: {}", num_str))?;
+
+    if num <= 0 {
+        anyhow::bail!("Duration must be positive, got: {}", num);
+    }
 
     let duration = match unit {
         "m" => Duration::minutes(num),
@@ -484,6 +502,20 @@ mod tests {
         let result = parse_duration("abch");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid duration number"));
+    }
+
+    #[test]
+    fn test_parse_duration_negative() {
+        let result = parse_duration("-5d");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be positive"));
+    }
+
+    #[test]
+    fn test_parse_duration_zero() {
+        let result = parse_duration("0h");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must be positive"));
     }
 
     #[test]

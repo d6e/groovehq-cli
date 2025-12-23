@@ -165,9 +165,9 @@ The CLI looks for configuration in these locations (in order of priority):
 
 ### Config File Location
 
-- **macOS**: `~/Library/Application Support/com.groovehq.cli/config.toml`
-- **Linux**: `~/.config/groovehq-cli/config.toml`
-- **Windows**: `%APPDATA%\groovehq\cli\config\config.toml`
+- **macOS**: `~/Library/Application Support/groove-cli/config.toml`
+- **Linux**: `~/.config/groove-cli/config.toml`
+- **Windows**: `%APPDATA%\groove-cli\config\config.toml`
 
 ### Config File Format
 

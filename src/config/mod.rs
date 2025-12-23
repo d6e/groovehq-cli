@@ -29,7 +29,7 @@ pub struct DefaultSettings {
 
 impl Config {
     pub fn path() -> Option<PathBuf> {
-        ProjectDirs::from("com", "groovehq", "cli")
+        ProjectDirs::from("", "", "groove-cli")
             .map(|dirs| dirs.config_dir().join("config.toml"))
     }
 

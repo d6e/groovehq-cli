@@ -14,12 +14,13 @@ use groovehq_cli::error;
 const DEFAULT_CONVERSATION_LIMIT: u32 = 25;
 const DEFAULT_MESSAGE_LIMIT: i32 = 50;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     if let Err(err) = run().await {
         eprintln!("Error: {err}");
 
-        if std::env::var("GROOVE_DEBUG").is_ok() {
+        // Show error chain if verbose flag was passed
+        if std::env::args().any(|arg| arg == "--verbose" || arg == "-v") {
             let mut source = err.source();
             while let Some(cause) = source {
                 eprintln!("Caused by: {cause}");

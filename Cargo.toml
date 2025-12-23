@@ -35,7 +35,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Terminal output
 colored = "3.0"
-comfy-table = "7.2"
+tabled = { version = "0.20", features = ["ansi"] }
 
 # Shell completions
 clap_complete = "4.5"

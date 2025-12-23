@@ -3,7 +3,103 @@ use crate::cli::OutputFormat;
 use crate::types::*;
 use chrono::{DateTime, Utc};
 use colored::Colorize;
-use comfy_table::{presets::UTF8_FULL_CONDENSED, Cell, Color, ContentArrangement, Table};
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
+
+#[derive(Tabled)]
+struct ConversationRow {
+    #[tabled(rename = "#")]
+    number: i64,
+    #[tabled(rename = "Status")]
+    status: String,
+    #[tabled(rename = "Subject")]
+    subject: String,
+    #[tabled(rename = "From")]
+    from: String,
+    #[tabled(rename = "Updated")]
+    updated: String,
+}
+
+impl ConversationRow {
+    fn from_conversation(conv: &Conversation) -> Self {
+        let status = format_state(&conv.state);
+        let subject = truncate(conv.subject.as_deref().unwrap_or("(no subject)"), 40);
+        let contact = conv
+            .contact
+            .as_ref()
+            .and_then(|c| c.email.as_deref().or(c.name.as_deref()))
+            .unwrap_or("unknown");
+        let updated = format_relative_time(&conv.updated_at);
+
+        Self {
+            number: conv.number,
+            status: format!("{}", status.color(state_color_str(&conv.state))),
+            subject,
+            from: truncate(contact, 25),
+            updated,
+        }
+    }
+}
+
+#[derive(Tabled)]
+struct FolderRow {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Count")]
+    count: String,
+    #[tabled(rename = "ID")]
+    id: String,
+}
+
+impl From<&Folder> for FolderRow {
+    fn from(folder: &Folder) -> Self {
+        Self {
+            name: folder.name.clone(),
+            count: folder.count.unwrap_or(0).to_string(),
+            id: folder.id.clone(),
+        }
+    }
+}
+
+#[derive(Tabled)]
+struct TagRow {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Color")]
+    color: String,
+    #[tabled(rename = "ID")]
+    id: String,
+}
+
+impl From<&Tag> for TagRow {
+    fn from(tag: &Tag) -> Self {
+        Self {
+            name: tag.name.clone(),
+            color: tag.color.as_deref().unwrap_or("-").to_string(),
+            id: tag.id.clone(),
+        }
+    }
+}
+
+#[derive(Tabled)]
+struct CannedReplyRow {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Subject")]
+    subject: String,
+    #[tabled(rename = "ID")]
+    id: String,
+}
+
+impl From<&CannedReply> for CannedReplyRow {
+    fn from(reply: &CannedReply) -> Self {
+        Self {
+            name: reply.name.clone(),
+            subject: reply.subject.as_deref().unwrap_or("-").to_string(),
+            id: reply.id.clone(),
+        }
+    }
+}
 
 pub fn format_conversations(response: &ConversationsResponse, format: &OutputFormat) {
     match format {
@@ -26,30 +122,12 @@ pub fn format_conversations(response: &ConversationsResponse, format: &OutputFor
             }
         }
         OutputFormat::Table => {
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL_CONDENSED)
-                .set_content_arrangement(ContentArrangement::Dynamic)
-                .set_header(vec!["#", "Status", "Subject", "From", "Updated"]);
-
-            for conv in &response.nodes {
-                let status = format_state(&conv.state);
-                let subject = truncate(conv.subject.as_deref().unwrap_or("(no subject)"), 40);
-                let contact = conv
-                    .contact
-                    .as_ref()
-                    .and_then(|c| c.email.as_deref().or(c.name.as_deref()))
-                    .unwrap_or("unknown");
-                let updated = format_relative_time(&conv.updated_at);
-
-                table.add_row(vec![
-                    Cell::new(conv.number),
-                    Cell::new(&status).fg(state_color(&conv.state)),
-                    Cell::new(subject),
-                    Cell::new(truncate(contact, 25)),
-                    Cell::new(updated),
-                ]);
-            }
+            let rows: Vec<ConversationRow> = response
+                .nodes
+                .iter()
+                .map(ConversationRow::from_conversation)
+                .collect();
+            let table = Table::new(rows).with(Style::rounded()).to_string();
 
             println!("{table}");
             println!(
@@ -170,19 +248,8 @@ pub fn format_folders(folders: &[Folder], format: &OutputFormat) {
             }
         }
         OutputFormat::Table => {
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL_CONDENSED)
-                .set_header(vec!["Name", "Count", "ID"]);
-
-            for folder in folders {
-                table.add_row(vec![
-                    Cell::new(&folder.name),
-                    Cell::new(folder.count.unwrap_or(0)),
-                    Cell::new(&folder.id).fg(Color::DarkGrey),
-                ]);
-            }
-
+            let rows: Vec<FolderRow> = folders.iter().map(FolderRow::from).collect();
+            let table = Table::new(rows).with(Style::rounded()).to_string();
             println!("{table}");
         }
     }
@@ -202,19 +269,8 @@ pub fn format_tags(tags: &[Tag], format: &OutputFormat) {
             }
         }
         OutputFormat::Table => {
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL_CONDENSED)
-                .set_header(vec!["Name", "Color", "ID"]);
-
-            for tag in tags {
-                table.add_row(vec![
-                    Cell::new(&tag.name),
-                    Cell::new(tag.color.as_deref().unwrap_or("-")),
-                    Cell::new(&tag.id).fg(Color::DarkGrey),
-                ]);
-            }
-
+            let rows: Vec<TagRow> = tags.iter().map(TagRow::from).collect();
+            let table = Table::new(rows).with(Style::rounded()).to_string();
             println!("{table}");
         }
     }
@@ -234,19 +290,8 @@ pub fn format_canned_replies(replies: &[CannedReply], format: &OutputFormat) {
             }
         }
         OutputFormat::Table => {
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL_CONDENSED)
-                .set_header(vec!["Name", "Subject", "ID"]);
-
-            for reply in replies {
-                table.add_row(vec![
-                    Cell::new(&reply.name),
-                    Cell::new(reply.subject.as_deref().unwrap_or("-")),
-                    Cell::new(&reply.id).fg(Color::DarkGrey),
-                ]);
-            }
-
+            let rows: Vec<CannedReplyRow> = replies.iter().map(CannedReplyRow::from).collect();
+            let table = Table::new(rows).with(Style::rounded()).to_string();
             println!("{table}");
         }
     }
@@ -294,17 +339,6 @@ fn format_state(state: &ConversationState) -> String {
         ConversationState::Snoozed => "snoozed".to_string(),
         ConversationState::Spam => "spam".to_string(),
         ConversationState::Deleted => "deleted".to_string(),
-    }
-}
-
-fn state_color(state: &ConversationState) -> Color {
-    match state {
-        ConversationState::Unread => Color::Yellow,
-        ConversationState::Opened => Color::Green,
-        ConversationState::Closed => Color::DarkGrey,
-        ConversationState::Snoozed => Color::Blue,
-        ConversationState::Spam => Color::Red,
-        ConversationState::Deleted => Color::DarkGrey,
     }
 }
 
@@ -418,17 +452,6 @@ mod tests {
         assert_eq!(format_state(&ConversationState::Snoozed), "snoozed");
         assert_eq!(format_state(&ConversationState::Spam), "spam");
         assert_eq!(format_state(&ConversationState::Deleted), "deleted");
-    }
-
-    #[test]
-    fn test_state_color_all_variants() {
-        use comfy_table::Color;
-        assert_eq!(state_color(&ConversationState::Unread), Color::Yellow);
-        assert_eq!(state_color(&ConversationState::Opened), Color::Green);
-        assert_eq!(state_color(&ConversationState::Closed), Color::DarkGrey);
-        assert_eq!(state_color(&ConversationState::Snoozed), Color::Blue);
-        assert_eq!(state_color(&ConversationState::Spam), Color::Red);
-        assert_eq!(state_color(&ConversationState::Deleted), Color::DarkGrey);
     }
 
     #[test]

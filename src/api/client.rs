@@ -306,41 +306,76 @@ impl GrooveClient {
         first: Option<i32>,
     ) -> Result<Vec<Message>> {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Response {
-            node: Option<ConversationWithMessages>,
+            event_groups: EventGroupsConnection,
         }
 
         #[derive(Deserialize)]
-        struct ConversationWithMessages {
-            messages: MessagesConnection,
+        struct EventGroupsConnection {
+            nodes: Vec<EventGroup>,
         }
 
         #[derive(Deserialize)]
-        struct MessagesConnection {
-            nodes: Vec<Message>,
+        struct EventGroup {
+            events: EventsConnection,
+        }
+
+        #[derive(Deserialize)]
+        struct EventsConnection {
+            nodes: Vec<Event>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Event {
+            created_at: chrono::DateTime<chrono::Utc>,
+            change: Option<Change>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(tag = "__typename")]
+        enum Change {
+            EmailMessage(EmailMessageChange),
+            #[serde(other)]
+            Other,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct EmailMessageChange {
+            id: String,
+            body_plain_text: Option<String>,
+            body: Option<String>,
+            author: Option<MessageAuthor>,
         }
 
         let query = r#"
-            query Messages($id: ID!, $first: Int) {
-                node(id: $id) {
-                    ... on Conversation {
-                        messages(first: $first) {
+            query Messages($conversationId: ID!, $first: Int) {
+                eventGroups(filter: { conversationId: $conversationId }, first: $first) {
+                    nodes {
+                        events {
                             nodes {
-                                id
                                 createdAt
-                                bodyText
-                                bodyHtml
-                                author {
+                                change {
                                     __typename
-                                    ... on Agent {
+                                    ... on EmailMessage {
                                         id
-                                        email
-                                        name
-                                    }
-                                    ... on Contact {
-                                        id
-                                        email
-                                        name
+                                        bodyPlainText
+                                        body
+                                        author {
+                                            __typename
+                                            ... on Agent {
+                                                id
+                                                email
+                                                name
+                                            }
+                                            ... on Contact {
+                                                id
+                                                email
+                                                name
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -351,12 +386,33 @@ impl GrooveClient {
         "#;
 
         let variables = json!({
-            "id": conversation_id,
+            "conversationId": conversation_id,
             "first": first.unwrap_or(DEFAULT_MESSAGES_LIMIT)
         });
 
         let response: Response = self.execute_with_retry(query, Some(variables)).await?;
-        Ok(response.node.map(|n| n.messages.nodes).unwrap_or_default())
+
+        // Flatten event groups into messages
+        let messages: Vec<Message> = response
+            .event_groups
+            .nodes
+            .into_iter()
+            .flat_map(|group| group.events.nodes)
+            .filter_map(|event| {
+                match event.change? {
+                    Change::EmailMessage(msg) => Some(Message {
+                        id: msg.id,
+                        created_at: event.created_at,
+                        body_text: msg.body_plain_text,
+                        body_html: msg.body,
+                        author: msg.author,
+                    }),
+                    Change::Other => None,
+                }
+            })
+            .collect();
+
+        Ok(messages)
     }
 
     pub async fn folders(&self) -> Result<Vec<Folder>> {

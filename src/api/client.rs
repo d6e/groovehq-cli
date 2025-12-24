@@ -193,10 +193,8 @@ impl GrooveClient {
                         state
                         createdAt
                         updatedAt
-                        snoozedUntil
-                        messagesCount
                         assigned {
-                            ... on Agent {
+                            agent {
                                 id
                                 email
                                 name
@@ -212,9 +210,11 @@ impl GrooveClient {
                             name
                         }
                         tags {
-                            id
-                            name
-                            color
+                            nodes {
+                                id
+                                name
+                                color
+                            }
                         }
                     }
                     pageInfo {
@@ -266,10 +266,8 @@ impl GrooveClient {
                     state
                     createdAt
                     updatedAt
-                    snoozedUntil
-                    messagesCount
                     assigned {
-                        ... on Agent {
+                        agent {
                             id
                             email
                             name
@@ -285,9 +283,11 @@ impl GrooveClient {
                         name
                     }
                     tags {
-                        id
-                        name
-                        color
+                        nodes {
+                            id
+                            name
+                            color
+                        }
                     }
                 }
             }
@@ -376,7 +376,6 @@ impl GrooveClient {
                     nodes {
                         id
                         name
-                        count
                     }
                 }
             }

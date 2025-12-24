@@ -45,8 +45,6 @@ impl ConversationRow {
 struct FolderRow {
     #[tabled(rename = "Name")]
     name: String,
-    #[tabled(rename = "Count")]
-    count: String,
     #[tabled(rename = "ID")]
     id: String,
 }
@@ -55,7 +53,6 @@ impl From<&Folder> for FolderRow {
     fn from(folder: &Folder) -> Self {
         Self {
             name: folder.name.clone(),
-            count: folder.count.unwrap_or(0).to_string(),
             id: folder.id.clone(),
         }
     }
@@ -243,8 +240,7 @@ pub fn format_folders(folders: &[Folder], format: &OutputFormat) {
         }
         OutputFormat::Compact => {
             for folder in folders {
-                let count = folder.count.map(|c| c.to_string()).unwrap_or_default();
-                println!("{} ({})", folder.name, count);
+                println!("{}", folder.name);
             }
         }
         OutputFormat::Table => {

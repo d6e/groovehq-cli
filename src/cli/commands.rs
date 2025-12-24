@@ -9,7 +9,7 @@ use clap_complete::{generate, Shell};
     about = "GrooveHQ CLI - Manage your inbox from the terminal"
 )]
 #[command(after_help = "EXAMPLES:
-    groove conversation list --status open
+    groove conversation list --status opened
     groove conversation view 12345
     groove conversation reply 12345 \"Thanks for reaching out!\"
     groove config show")]
@@ -38,7 +38,7 @@ pub struct Cli {
 pub enum Commands {
     /// Manage conversations
     #[command(alias = "conv", alias = "c", after_help = "EXAMPLES:
-    groove conversation list --status open --limit 10
+    groove conversation list --status opened --limit 10
     groove conversation view 12345 --full
     groove conversation reply 12345 \"Thank you!\"
     groove conversation close 12345 12346")]
@@ -103,10 +103,10 @@ pub enum ConversationAction {
     /// List conversations
     #[command(alias = "ls", alias = "l", after_help = "EXAMPLES:
     groove conversation list
-    groove conversation list --status open --folder inbox
+    groove conversation list --status opened --folder inbox
     groove conversation list --search \"password reset\" --limit 10")]
     List {
-        /// Filter by status (open, closed, snoozed, unread)
+        /// Filter by status (opened, closed, snoozed, unread)
         #[arg(short, long)]
         status: Option<String>,
 

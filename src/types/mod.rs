@@ -1,5 +1,36 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Wrapper for the Assignment type that contains an agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assignment {
+    pub agent: Option<Agent>,
+}
+
+/// Wrapper for connection types that have nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagConnection {
+    #[serde(default)]
+    pub nodes: Vec<Tag>,
+}
+
+fn deserialize_assigned<'de, D>(deserializer: D) -> Result<Option<Agent>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let assignment: Option<Assignment> = Option::deserialize(deserializer)?;
+    Ok(assignment.and_then(|a| a.agent))
+}
+
+fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<Tag>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let connection: Option<TagConnection> = Option::deserialize(deserializer)?;
+    Ok(connection.map(|c| c.nodes).unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -10,15 +41,13 @@ pub struct Conversation {
     pub state: ConversationState,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub snoozed_until: Option<DateTime<Utc>>,
-    pub messages_count: Option<i32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_assigned")]
     pub assigned: Option<Agent>,
     #[serde(default)]
     pub channel: Option<Channel>,
     #[serde(default)]
     pub contact: Option<Contact>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tags")]
     pub tags: Vec<Tag>,
 }
 
@@ -82,8 +111,6 @@ pub struct Tag {
 pub struct Folder {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub count: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

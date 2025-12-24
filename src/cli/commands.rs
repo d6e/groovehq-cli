@@ -278,6 +278,11 @@ pub enum CannedRepliesAction {
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
+    /// Interactive configuration setup
+    #[command(after_help = "EXAMPLES:
+    groove config init")]
+    Init,
+
     /// Show current configuration
     #[command(after_help = "EXAMPLES:
     groove config show")]

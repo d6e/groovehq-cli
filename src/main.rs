@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::{Duration, Utc};
 use clap::Parser;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal, Read, Write};
 
 use groovehq_cli::api::{GrooveClient, MAX_ITEMS_PER_PAGE};
 use groovehq_cli::cli::{
@@ -63,6 +63,61 @@ async fn run() -> anyhow::Result<()> {
 
 fn handle_config(action: &ConfigAction, config: &Config, quiet: bool) -> anyhow::Result<()> {
     match action {
+        ConfigAction::Init => {
+            let path = Config::path()
+                .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+
+            if path.exists() {
+                print!(
+                    "Config file already exists at {}. Overwrite? [y/N] ",
+                    path.display()
+                );
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
+
+            println!("GrooveHQ CLI Configuration");
+            println!("==========================\n");
+
+            // Get API token
+            print!("Enter your GrooveHQ API token (from Settings > API): ");
+            io::stdout().flush()?;
+
+            let mut api_token = String::new();
+            io::stdin().read_line(&mut api_token)?;
+            let api_token = api_token.trim();
+
+            if api_token.is_empty() {
+                anyhow::bail!("API token is required");
+            }
+
+            // Get custom endpoint (optional)
+            print!("Enter custom API endpoint [leave empty for default]: ");
+            io::stdout().flush()?;
+
+            let mut api_endpoint = String::new();
+            io::stdin().read_line(&mut api_endpoint)?;
+            let api_endpoint = api_endpoint.trim();
+
+            // Create config
+            let mut new_config = Config::default();
+            new_config.api_token = Some(api_token.to_string());
+            if !api_endpoint.is_empty() {
+                new_config.api_endpoint = Some(api_endpoint.to_string());
+            }
+
+            new_config.save()?;
+
+            println!("\nConfig saved to {}", path.display());
+            println!("You can now use 'groove' commands!");
+        }
         ConfigAction::Show => {
             if let Some(token) = &config.api_token {
                 let masked = if token.len() > 8 {

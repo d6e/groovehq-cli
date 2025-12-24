@@ -308,16 +308,6 @@ impl GrooveClient {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Response {
-            event_groups: EventGroupsConnection,
-        }
-
-        #[derive(Deserialize)]
-        struct EventGroupsConnection {
-            nodes: Vec<EventGroup>,
-        }
-
-        #[derive(Deserialize)]
-        struct EventGroup {
             events: EventsConnection,
         }
 
@@ -336,14 +326,15 @@ impl GrooveClient {
         #[derive(Deserialize)]
         #[serde(tag = "__typename")]
         enum Change {
-            EmailMessage(EmailMessageChange),
+            EmailMessage(MessageChange),
+            Reply(MessageChange),
             #[serde(other)]
             Other,
         }
 
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct EmailMessageChange {
+        struct MessageChange {
             id: String,
             body_plain_text: Option<String>,
             body: Option<String>,
@@ -352,30 +343,44 @@ impl GrooveClient {
 
         let query = r#"
             query Messages($conversationId: ID!, $first: Int) {
-                eventGroups(filter: { conversationId: $conversationId }, first: $first) {
+                events(filter: { conversationId: $conversationId }, first: $first) {
                     nodes {
-                        events {
-                            nodes {
-                                createdAt
-                                change {
+                        createdAt
+                        change {
+                            __typename
+                            ... on EmailMessage {
+                                id
+                                bodyPlainText
+                                body
+                                author {
                                     __typename
-                                    ... on EmailMessage {
+                                    ... on Agent {
                                         id
-                                        bodyPlainText
-                                        body
-                                        author {
-                                            __typename
-                                            ... on Agent {
-                                                id
-                                                email
-                                                name
-                                            }
-                                            ... on Contact {
-                                                id
-                                                email
-                                                name
-                                            }
-                                        }
+                                        email
+                                        name
+                                    }
+                                    ... on Contact {
+                                        id
+                                        email
+                                        name
+                                    }
+                                }
+                            }
+                            ... on Reply {
+                                id
+                                bodyPlainText
+                                body
+                                author {
+                                    __typename
+                                    ... on Agent {
+                                        id
+                                        email
+                                        name
+                                    }
+                                    ... on Contact {
+                                        id
+                                        email
+                                        name
                                     }
                                 }
                             }
@@ -392,15 +397,14 @@ impl GrooveClient {
 
         let response: Response = self.execute_with_retry(query, Some(variables)).await?;
 
-        // Flatten event groups into messages
+        // Extract messages from events
         let messages: Vec<Message> = response
-            .event_groups
+            .events
             .nodes
             .into_iter()
-            .flat_map(|group| group.events.nodes)
             .filter_map(|event| {
                 match event.change? {
-                    Change::EmailMessage(msg) => Some(Message {
+                    Change::EmailMessage(msg) | Change::Reply(msg) => Some(Message {
                         id: msg.id,
                         created_at: event.created_at,
                         body_text: msg.body_plain_text,

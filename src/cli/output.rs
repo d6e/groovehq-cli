@@ -192,8 +192,11 @@ pub fn format_conversation_detail(conv: &Conversation, messages: &[Message], ful
     println!("{}", "─".repeat(60).dimmed());
     println!();
 
-    for msg in messages {
+    for (i, msg) in messages.iter().enumerate() {
         print_message(msg, full);
+        if i < messages.len() - 1 {
+            println!("{}", "─".repeat(60).dimmed());
+        }
     }
 }
 
@@ -226,8 +229,63 @@ fn print_message(msg: &Message, full: bool) {
         } else {
             truncate_lines(body, 10)
         };
-        println!("{}\n", text);
+        let text = clean_message_body(&text);
+        print_message_body(&text);
     }
+}
+
+/// Clean up message body: decode HTML entities and collapse consecutive blank lines
+fn clean_message_body(body: &str) -> String {
+    // Decode common HTML entities
+    let text = body
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+
+    // Collapse consecutive blank lines (lines with only whitespace count as blank)
+    let mut result_lines: Vec<&str> = Vec::new();
+    let mut consecutive_blank = 0;
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            consecutive_blank += 1;
+            if consecutive_blank <= 1 {
+                result_lines.push("");
+            }
+        } else {
+            consecutive_blank = 0;
+            result_lines.push(line);
+        }
+    }
+
+    result_lines.join("\n").trim().to_string()
+}
+
+/// Print message body with quoted content dimmed
+fn print_message_body(body: &str) {
+    let mut in_quote = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+
+        // Detect start of quoted section: "On ... wrote:" pattern
+        if trimmed.starts_with("On ") && trimmed.contains(" wrote:") {
+            in_quote = true;
+        }
+
+        // Lines starting with > are always quoted
+        let is_quoted = in_quote || trimmed.starts_with('>');
+
+        if is_quoted {
+            println!("{}", line.bright_black());
+        } else {
+            println!("{}", line);
+        }
+    }
+    println!();
 }
 
 pub fn format_folders(folders: &[Folder], format: &OutputFormat) {

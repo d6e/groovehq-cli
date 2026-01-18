@@ -28,6 +28,9 @@ fn test_missing_token() {
     groove()
         .arg("me")
         .env_remove("GROOVEHQ_API_TOKEN")
+        // Use a non-existent home dir to avoid finding a config file
+        .env("HOME", "/nonexistent")
+        .env("XDG_CONFIG_HOME", "/nonexistent")
         .assert()
         .failure()
         .stderr(predicate::str::contains("API token not found"));

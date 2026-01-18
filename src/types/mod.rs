@@ -111,6 +111,7 @@ pub struct Tag {
 pub struct Folder {
     pub id: String,
     pub name: String,
+    pub count: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -436,6 +436,7 @@ impl GrooveClient {
                     nodes {
                         id
                         name
+                        count
                     }
                 }
             }

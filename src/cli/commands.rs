@@ -115,7 +115,7 @@ pub enum ConversationAction {
         folder: Option<String>,
 
         /// Search by keyword in subject/body
-        #[arg(short = 'q', long)]
+        #[arg(short = 'Q', long)]
         search: Option<String>,
 
         /// Number of results to show (default: 25, or from config)

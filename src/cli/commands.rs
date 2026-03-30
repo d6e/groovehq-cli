@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 
 #[derive(Parser)]
@@ -14,10 +14,6 @@ use clap_complete::{generate, Shell};
     groove conversation reply 12345 \"Thanks for reaching out!\"
     groove config show")]
 pub struct Cli {
-    /// Output format (table, json, compact)
-    #[arg(long, short = 'o', global = true)]
-    pub format: Option<OutputFormat>,
-
     /// API token (overrides config file and env var)
     #[arg(long, global = true, hide_env_values = true)]
     pub token: Option<String>,
@@ -129,15 +125,10 @@ pub enum ConversationAction {
 
     /// Show a specific conversation with messages
     #[command(alias = "show", alias = "v", after_help = "EXAMPLES:
-    groove conversation view 12345
-    groove conversation view 12345 --full")]
+    groove conversation view 12345")]
     View {
         /// Conversation number
         number: i64,
-
-        /// Show full message bodies (not truncated)
-        #[arg(long)]
-        full: bool,
     },
 
     /// Reply to a conversation
@@ -302,29 +293,6 @@ pub enum ConfigAction {
     Path,
 }
 
-#[derive(ValueEnum, Clone, Debug, Default)]
-pub enum OutputFormat {
-    #[default]
-    Table,
-    Json,
-    Compact,
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "table" => Ok(OutputFormat::Table),
-            "json" => Ok(OutputFormat::Json),
-            "compact" => Ok(OutputFormat::Compact),
-            _ => Err(format!(
-                "Invalid format: {}. Use table, json, or compact",
-                s
-            )),
-        }
-    }
-}
 
 pub fn print_completions(shell: Shell) {
     let mut cmd = Cli::command();

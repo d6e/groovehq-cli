@@ -119,18 +119,6 @@ fn test_quiet_flag() {
 }
 
 #[test]
-fn test_format_flag() {
-    groove()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--format"))
-        .stdout(predicate::str::contains("table"))
-        .stdout(predicate::str::contains("json"))
-        .stdout(predicate::str::contains("compact"));
-}
-
-#[test]
 fn test_conversation_aliases() {
     // 'conv' should work
     groove().args(["conv", "--help"]).assert().success();

@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use groovehq_cli::api::{GrooveClient, MAX_ITEMS_PER_PAGE};
 use groovehq_cli::cli::{
     self, print_completions, CannedRepliesAction, Cli, Commands, ConfigAction, ConversationAction,
-    FolderAction, OutputFormat, TagAction,
+    FolderAction, TagAction,
 };
 use groovehq_cli::config::{self, Config};
 use groovehq_cli::error;
@@ -36,16 +36,6 @@ async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = Config::load().context("Failed to load configuration")?;
 
-    // Resolve format: CLI flag > config default > "table"
-    let format = cli.format.unwrap_or_else(|| {
-        config
-            .defaults
-            .format
-            .as_ref()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(OutputFormat::Table)
-    });
-
     match &cli.command {
         Commands::Config { action } => handle_config(&action, &config, cli.quiet)?,
         Commands::Completions { shell } => {
@@ -54,7 +44,7 @@ async fn run() -> anyhow::Result<()> {
         _ => {
             let token = config::resolve_token(cli.token.as_deref(), &config)?;
             let client = GrooveClient::new(&token, config.api_endpoint.as_deref())?;
-            handle_command(&cli.command, &client, &format, &config, cli.quiet).await?;
+            handle_command(&cli.command, &client, &config, cli.quiet).await?;
         }
     }
 
@@ -154,30 +144,29 @@ fn handle_config(action: &ConfigAction, config: &Config, quiet: bool) -> anyhow:
 async fn handle_command(
     command: &Commands,
     client: &GrooveClient,
-    format: &OutputFormat,
     config: &Config,
     quiet: bool,
 ) -> anyhow::Result<()> {
     match command {
         Commands::Me => {
             let agent = client.me().await?;
-            cli::format_agent(&agent, format);
+            cli::format_agent(&agent);
         }
 
         Commands::Conversation { action } => {
-            handle_conversation(action, client, format, config, quiet).await?;
+            handle_conversation(action, client, config, quiet).await?;
         }
 
         Commands::Folder { action } => {
-            handle_folder(action, client, format).await?;
+            handle_folder(action, client).await?;
         }
 
         Commands::Tag { action } => {
-            handle_tag(action, client, format).await?;
+            handle_tag(action, client).await?;
         }
 
         Commands::CannedReplies { action } => {
-            handle_canned_replies(action, client, format).await?;
+            handle_canned_replies(action, client).await?;
         }
 
         Commands::Config { .. } | Commands::Completions { .. } => unreachable!(),
@@ -189,7 +178,6 @@ async fn handle_command(
 async fn handle_conversation(
     action: &ConversationAction,
     client: &GrooveClient,
-    format: &OutputFormat,
     config: &Config,
     quiet: bool,
 ) -> anyhow::Result<()> {
@@ -215,15 +203,15 @@ async fn handle_conversation(
                     search.as_deref(),
                 )
                 .await?;
-            cli::format_conversations(&response, format);
+            cli::format_conversations(&response);
         }
 
-        ConversationAction::View { number, full } => {
+        ConversationAction::View { number } => {
             let conv = get_conversation(client, *number).await?;
             let messages = client
                 .messages(&conv.id, Some(DEFAULT_MESSAGE_LIMIT))
                 .await?;
-            cli::format_conversation_detail(&conv, &messages, *full);
+            cli::format_conversation_detail(&conv, &messages);
         }
 
         ConversationAction::Reply {
@@ -340,12 +328,11 @@ async fn handle_conversation(
 async fn handle_folder(
     action: &FolderAction,
     client: &GrooveClient,
-    format: &OutputFormat,
 ) -> anyhow::Result<()> {
     match action {
         FolderAction::List => {
             let folders = client.folders().await?;
-            cli::format_folders(&folders, format);
+            cli::format_folders(&folders);
             if folders.len() >= MAX_ITEMS_PER_PAGE {
                 eprintln!(
                     "Warning: Results may be truncated (showing {} items)",
@@ -360,12 +347,11 @@ async fn handle_folder(
 async fn handle_tag(
     action: &TagAction,
     client: &GrooveClient,
-    format: &OutputFormat,
 ) -> anyhow::Result<()> {
     match action {
         TagAction::List => {
             let tags = client.tags().await?;
-            cli::format_tags(&tags, format);
+            cli::format_tags(&tags);
             if tags.len() >= MAX_ITEMS_PER_PAGE {
                 eprintln!(
                     "Warning: Results may be truncated (showing {} items)",
@@ -380,12 +366,11 @@ async fn handle_tag(
 async fn handle_canned_replies(
     action: &CannedRepliesAction,
     client: &GrooveClient,
-    format: &OutputFormat,
 ) -> anyhow::Result<()> {
     match action {
         CannedRepliesAction::List => {
             let replies = client.canned_replies().await?;
-            cli::format_canned_replies(&replies, format);
+            cli::format_canned_replies(&replies);
             if replies.len() >= MAX_ITEMS_PER_PAGE {
                 eprintln!(
                     "Warning: Results may be truncated (showing {} items)",

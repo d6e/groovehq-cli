@@ -22,7 +22,6 @@ pub struct Config {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DefaultSettings {
-    pub format: Option<String>,
     pub limit: Option<u32>,
     pub folder: Option<String>,
 }
@@ -77,7 +76,6 @@ mod tests {
         let config = Config::default();
         assert!(config.api_token.is_none());
         assert!(config.api_endpoint.is_none());
-        assert!(config.defaults.format.is_none());
         assert!(config.defaults.limit.is_none());
         assert!(config.defaults.folder.is_none());
         assert!(config.aliases.is_empty());
@@ -100,7 +98,6 @@ api_token = "test-token"
 api_endpoint = "https://custom.api.com/graphql"
 
 [defaults]
-format = "json"
 limit = 50
 folder = "inbox"
 
@@ -113,7 +110,6 @@ ls = "conversation list"
             config.api_endpoint,
             Some("https://custom.api.com/graphql".to_string())
         );
-        assert_eq!(config.defaults.format, Some("json".to_string()));
         assert_eq!(config.defaults.limit, Some(50));
         assert_eq!(config.defaults.folder, Some("inbox".to_string()));
         assert_eq!(

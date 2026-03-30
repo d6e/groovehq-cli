@@ -33,10 +33,6 @@ anyhow = "1.0"
 # Date/time handling
 chrono = { version = "0.4", features = ["serde"] }
 
-# Terminal output
-colored = "3.0"
-tabled = { version = "0.20", features = ["ansi"] }
-
 # Shell completions
 clap_complete = "4.5"
 
